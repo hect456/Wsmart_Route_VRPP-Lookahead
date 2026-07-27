@@ -1,15 +1,15 @@
-"""Passo 1 — Matriz de distancias/tempos com OpenRouteService (OSM).
+"""Step 1 — Distance/time matrix from OpenRouteService (OSM).
 
-Porte directo de `calcular_matriz_ORS.py`: **a logica nao foi alterada**.
-As unicas mudancas sao estruturais:
-  * as constantes globais passaram a parametros (`ORS` em `config.py`);
-  * a API key deixou de estar no codigo e vem da variavel de ambiente ORS_API_KEY;
-  * `main()` foi substituido por `gerar_matriz_ors(cfg)`, chamado por
-    `scripts/01_gerar_matriz_ors.py`.
+Direct port of `calcular_matriz_ORS.py`: **the logic was not changed**.
+The only differences are structural:
+  * the global constants became parameters (`ORS` in `config.py`);
+  * the API key is no longer in the code and comes from the ORS_API_KEY env var;
+  * `main()` was replaced by `build_ors_matrix(cfg)`, called from
+    `scripts/01_build_ors_matrix.py`.
 
-Entrada : Excel com colunas ID_bin | Latitude | Longitude (deposito com ID_bin = 0).
-Saida   : Excel com 6 folhas — nodos_ordenados, distancia_km, duracion_min,
-          distancia_modelo, duracion_modelo, formato_largo.
+Input : Excel with columns ID_bin | Latitude | Longitude (depot with ID_bin = 0).
+Output: Excel with 6 sheets — ordered_nodes, distance_km, duration_min,
+        distance_model, duration_model, long_format.
 """
 from __future__ import annotations
 
@@ -23,226 +23,226 @@ import requests
 
 from .config import ORS, Config
 
-COLUNAS_REQUERIDAS = {'ID_bin', 'Latitude', 'Longitude'}
+REQUIRED_COLUMNS = {'ID_bin', 'Latitude', 'Longitude'}
 
 
 # ══════════════════════════════════════════════════════════════════
-# Preparacao dos nos
+# Node preparation
 # ══════════════════════════════════════════════════════════════════
-def normalizar_id_bin(valor):
-    if pd.isna(valor):
+def normalize_id_bin(value):
+    if pd.isna(value):
         return None
-    texto = str(valor).strip()
+    text = str(value).strip()
     try:
-        numero = float(texto)
-        return str(int(numero)) if numero.is_integer() else str(numero)
+        number = float(text)
+        return str(int(number)) if number.is_integer() else str(number)
     except ValueError:
-        return texto
+        return text
 
 
-def dividir_en_bloques(lista: list, tamano: int):
-    for i in range(0, len(lista), tamano):
-        yield lista[i:i + tamano]
+def split_into_blocks(items: list, size: int):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
 
 
-def validar_columnas(df: pd.DataFrame) -> None:
+def validate_columns(df: pd.DataFrame) -> None:
     df.columns = df.columns.astype(str).str.strip()
-    faltantes = COLUNAS_REQUERIDAS - set(df.columns)
-    if faltantes:
-        raise ValueError(f'Faltan columnas: {faltantes}. Columnas encontradas: {list(df.columns)}')
+    missing = REQUIRED_COLUMNS - set(df.columns)
+    if missing:
+        raise ValueError(f'Missing columns: {missing}. Columns found: {list(df.columns)}')
 
 
-def preparar_nodos(df: pd.DataFrame) -> pd.DataFrame:
-    """Deposito (ID_bin=0) na primeira linha; restantes contentores a seguir."""
+def prepare_nodes(df: pd.DataFrame) -> pd.DataFrame:
+    """Depot (ID_bin=0) in the first row; the remaining bins after it."""
     df = df.copy()
     df.columns = df.columns.astype(str).str.strip()
     df = df[['ID_bin', 'Latitude', 'Longitude']].dropna(subset=['ID_bin', 'Latitude', 'Longitude'])
-    df['ID_bin'] = df['ID_bin'].apply(normalizar_id_bin)
+    df['ID_bin'] = df['ID_bin'].apply(normalize_id_bin)
     df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
     df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
 
     if df[['Latitude', 'Longitude']].isna().any().any():
-        raise ValueError('Existen coordenadas vacias o no numericas.')
+        raise ValueError('There are empty or non-numeric coordinates.')
 
-    depositos = df[df['ID_bin'] == '0'].copy()
-    contenedores = df[df['ID_bin'] != '0'].copy()
-    if depositos.empty:
-        raise ValueError('No se encontro deposito con ID_bin = 0.')
-    if len(depositos) > 1:
-        print('Aviso: varios ID_bin=0; se usa solo el primero.')
-    if contenedores['ID_bin'].duplicated().any():
-        dups = contenedores.loc[contenedores['ID_bin'].duplicated(), 'ID_bin'].tolist()
-        raise ValueError(f'ID_bin duplicados en contenedores: {dups}')
+    depots = df[df['ID_bin'] == '0'].copy()
+    bins = df[df['ID_bin'] != '0'].copy()
+    if depots.empty:
+        raise ValueError('No depot found with ID_bin = 0.')
+    if len(depots) > 1:
+        print('Warning: several ID_bin=0 rows; only the first one is used.')
+    if bins['ID_bin'].duplicated().any():
+        dups = bins.loc[bins['ID_bin'].duplicated(), 'ID_bin'].tolist()
+        raise ValueError(f'Duplicated ID_bin among the bins: {dups}')
 
-    df_nodos = pd.concat([depositos.iloc[[0]], contenedores], ignore_index=True)
-    df_nodos['Nodo_matriz'] = df_nodos['ID_bin'].astype(str)
-    df_nodos['Nodo_modelo'] = range(len(df_nodos))
-    df_nodos['Tipo_nodo'] = 'contenedor'
-    df_nodos.loc[0, 'Tipo_nodo'] = 'deposito'
-    return df_nodos
+    df_nodes = pd.concat([depots.iloc[[0]], bins], ignore_index=True)
+    df_nodes['Matrix_node'] = df_nodes['ID_bin'].astype(str)
+    df_nodes['Model_node'] = range(len(df_nodes))
+    df_nodes['Node_type'] = 'bin'
+    df_nodes.loc[0, 'Node_type'] = 'depot'
+    return df_nodes
 
 
-def construir_coordenadas_ors(df: pd.DataFrame) -> List[List[float]]:
-    """ORS usa a ordem [longitude, latitude] (inversa da Google)."""
+def build_ors_coordinates(df: pd.DataFrame) -> List[List[float]]:
+    """ORS uses the order [longitude, latitude] (the reverse of Google)."""
     return [[float(r['Longitude']), float(r['Latitude'])] for _, r in df.iterrows()]
 
 
 # ══════════════════════════════════════════════════════════════════
-# Chamada a Matrix API
+# Matrix API call
 # ══════════════════════════════════════════════════════════════════
-def consultar_ors_matrix(coordenadas, indices_origenes, indices_destinos,
-                         api_key: str, modo: str = 'driving-car') -> dict:
-    """Devolve {'durations': [[s]], 'distances': [[km]]} com recuo exponencial em 429."""
-    url = f'https://api.openrouteservice.org/v2/matrix/{modo}'
+def query_ors_matrix(coordinates, source_indices, destination_indices,
+                     api_key: str, mode: str = 'driving-car') -> dict:
+    """Returns {'durations': [[s]], 'distances': [[km]]} with exponential backoff on 429."""
+    url = f'https://api.openrouteservice.org/v2/matrix/{mode}'
     headers = {'Content-Type': 'application/json', 'Authorization': api_key}
     body = {
-        'locations': coordenadas,
-        'sources': indices_origenes,
-        'destinations': indices_destinos,
+        'locations': coordinates,
+        'sources': source_indices,
+        'destinations': destination_indices,
         'metrics': ['distance', 'duration'],
         'units': 'km',
     }
 
-    espera_inicial, intentos_maximos = 3, 6
-    for intento in range(intentos_maximos):
+    initial_wait, max_attempts = 3, 6
+    for attempt in range(max_attempts):
         resp = requests.post(url, headers=headers, json=body, timeout=120)
         if resp.status_code == 429:
-            espera = espera_inicial * (2 ** intento)
-            print(f'  Rate-limit (429). Esperando {espera}s... ({intento+1}/{intentos_maximos})')
-            time.sleep(espera)
+            wait = initial_wait * (2 ** attempt)
+            print(f'  Rate limit (429). Waiting {wait}s... ({attempt+1}/{max_attempts})')
+            time.sleep(wait)
             continue
         if resp.status_code != 200:
-            raise RuntimeError(f'Error HTTP {resp.status_code} en ORS Matrix API:\n{resp.text}')
+            raise RuntimeError(f'HTTP error {resp.status_code} in the ORS Matrix API:\n{resp.text}')
         break
     else:
-        raise RuntimeError('Reintentos agotados tras error 429.')
+        raise RuntimeError('Retries exhausted after error 429.')
 
     try:
-        datos = resp.json()
+        data = resp.json()
     except ValueError:
-        raise RuntimeError(f'Respuesta no es JSON valido:\n{resp.text}')
-    if 'error' in datos:
-        raise RuntimeError(f'Error ORS: {datos["error"]}')
-    return datos
+        raise RuntimeError(f'Response is not valid JSON:\n{resp.text}')
+    if 'error' in data:
+        raise RuntimeError(f'ORS error: {data["error"]}')
+    return data
 
 
-def generar_matriz_distancias(df_nodos: pd.DataFrame, ors: ORS) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Matriz N x N por blocos de origens.
+def build_distance_matrix(df_nodes: pd.DataFrame, ors: ORS) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """N x N matrix, one request per block of sources.
 
-    Tamanho do bloco = floor(max_routes_per_request / n), garantindo
-    bloco x n <= limite do servidor para qualquer numero de nos.
+    Block size = floor(max_routes_per_request / n), which guarantees
+    block x n <= the server limit for any number of nodes.
     """
-    ids = df_nodos['Nodo_matriz'].astype(str).tolist()
+    ids = df_nodes['Matrix_node'].astype(str).tolist()
     n = len(ids)
-    coords = construir_coordenadas_ors(df_nodos)
+    coords = build_ors_coordinates(df_nodes)
 
-    if ors.bloque_manual is not None:
-        bloco = int(ors.bloque_manual)
-        if bloco * n > ors.max_routes_per_request:
+    if ors.manual_block is not None:
+        block = int(ors.manual_block)
+        if block * n > ors.max_routes_per_request:
             raise ValueError(
-                f'bloque_manual={bloco} x n={n} = {bloco*n} excede o limite ORS de '
-                f'{ors.max_routes_per_request} rotas/pedido. Reduza para '
-                f'{ors.max_routes_per_request // n} ou menos.')
+                f'manual_block={block} x n={n} = {block*n} exceeds the ORS limit of '
+                f'{ors.max_routes_per_request} routes/request. Reduce it to '
+                f'{ors.max_routes_per_request // n} or less.')
     else:
-        bloco = max(1, ors.max_routes_per_request // n)
+        block = max(1, ors.max_routes_per_request // n)
 
-    todos_destinos = list(range(n))
-    total_bloques = math.ceil(n / bloco)
+    all_destinations = list(range(n))
+    total_blocks = math.ceil(n / block)
 
-    print(f'Nodos en matriz: {n}  |  Deposito: {ids[0]}  |  Modo: {ors.modo_transporte}')
-    print(f'Limite ORS: {ors.max_routes_per_request} rutas/peticion')
-    print(f'Bloque de origenes: {bloco}  ->  {bloco}x{n}={bloco*n} rutas/peticion')
-    print(f'Peticiones necesarias: {total_bloques}')
-    print(f'Tiempo estimado: ~{total_bloques * ors.pausa_s / 60:.0f} min\n')
+    print(f'Nodes in matrix: {n}  |  Depot: {ids[0]}  |  Mode: {ors.transport_mode}')
+    print(f'ORS limit: {ors.max_routes_per_request} routes/request')
+    print(f'Source block: {block}  ->  {block}x{n}={block*n} routes/request')
+    print(f'Requests needed: {total_blocks}')
+    print(f'Estimated time: ~{total_blocks * ors.pause_s / 60:.0f} min\n')
 
     mat_dist = pd.DataFrame(index=ids, columns=ids, dtype=float)
     mat_dur = pd.DataFrame(index=ids, columns=ids, dtype=float)
-    nulos = []
+    nulls = []
 
     api_key = ors.api_key()
-    for num_bloque, bloque_orig in enumerate(dividir_en_bloques(todos_destinos, bloco), start=1):
-        print(f'  Bloque {num_bloque}/{total_bloques}: origenes '
-              f'{bloque_orig[0]}..{bloque_orig[-1]} x {n} destinos '
-              f'({len(bloque_orig)*n} rutas)...')
+    for block_no, source_block in enumerate(split_into_blocks(all_destinations, block), start=1):
+        print(f'  Block {block_no}/{total_blocks}: sources '
+              f'{source_block[0]}..{source_block[-1]} x {n} destinations '
+              f'({len(source_block)*n} routes)...')
 
-        datos = consultar_ors_matrix(coords, bloque_orig, todos_destinos,
-                                     api_key, ors.modo_transporte)
-        distancias, duraciones = datos.get('distances'), datos.get('durations')
-        if distancias is None or duraciones is None:
-            raise RuntimeError(f"Respuesta ORS sin 'distances'/'durations': {datos}")
-        if len(distancias) != len(bloque_orig):
-            raise RuntimeError(f'Bloque {num_bloque}: ORS devolvio {len(distancias)} filas, '
-                               f'esperadas {len(bloque_orig)}.')
-        for i_local, fila in enumerate(distancias):
-            if len(fila) != n:
-                raise RuntimeError(f'Bloque {num_bloque}, fila {i_local}: {len(fila)} columnas, '
-                                   f'esperadas {n}.')
+        data = query_ors_matrix(coords, source_block, all_destinations,
+                                api_key, ors.transport_mode)
+        distances, durations = data.get('distances'), data.get('durations')
+        if distances is None or durations is None:
+            raise RuntimeError(f"ORS response without 'distances'/'durations': {data}")
+        if len(distances) != len(source_block):
+            raise RuntimeError(f'Block {block_no}: ORS returned {len(distances)} rows, '
+                               f'{len(source_block)} expected.')
+        for i_local, row in enumerate(distances):
+            if len(row) != n:
+                raise RuntimeError(f'Block {block_no}, row {i_local}: {len(row)} columns, '
+                                   f'{n} expected.')
 
-        for i_local, i_global in enumerate(bloque_orig):
-            id_orig = ids[i_global]
-            for j_global in todos_destinos:
-                id_dest = ids[j_global]
-                dist_km = distancias[i_local][j_global]
-                dur_seg = duraciones[i_local][j_global]
+        for i_local, i_global in enumerate(source_block):
+            id_src = ids[i_global]
+            for j_global in all_destinations:
+                id_dst = ids[j_global]
+                dist_km = distances[i_local][j_global]
+                dur_s = durations[i_local][j_global]
                 if i_global == j_global:
-                    mat_dist.loc[id_orig, id_dest] = 0.0
-                    mat_dur.loc[id_orig, id_dest] = 0.0
-                elif dist_km is None or dur_seg is None:
-                    nulos.append((id_orig, id_dest))
-                    mat_dist.loc[id_orig, id_dest] = float('nan')
-                    mat_dur.loc[id_orig, id_dest] = float('nan')
+                    mat_dist.loc[id_src, id_dst] = 0.0
+                    mat_dur.loc[id_src, id_dst] = 0.0
+                elif dist_km is None or dur_s is None:
+                    nulls.append((id_src, id_dst))
+                    mat_dist.loc[id_src, id_dst] = float('nan')
+                    mat_dur.loc[id_src, id_dst] = float('nan')
                 else:
-                    mat_dist.loc[id_orig, id_dest] = round(float(dist_km), 4)
-                    mat_dur.loc[id_orig, id_dest] = round(float(dur_seg) / 60.0, 4)
+                    mat_dist.loc[id_src, id_dst] = round(float(dist_km), 4)
+                    mat_dur.loc[id_src, id_dst] = round(float(dur_s) / 60.0, 4)
 
-        time.sleep(ors.pausa_s)
+        time.sleep(ors.pause_s)
 
     nan_total = int(mat_dist.isna().sum().sum())
     if nan_total == 0:
-        print('\nMatriz completa: 0 valores NaN.')
+        print('\nMatrix complete: 0 NaN values.')
     else:
-        afectados = sorted({o for o, _ in nulos} | {d for _, d in nulos})
-        print(f'\nAVISO: {nan_total} celdas sin ruta (NaN).')
-        print(f'  Nodos afectados ({len(afectados)}): {afectados[:20]}'
-              f'{"..." if len(afectados) > 20 else ""}')
-        print('  Posible causa: coordenadas fuera de red vial o nodos aislados.')
+        affected = sorted({o for o, _ in nulls} | {d for _, d in nulls})
+        print(f'\nWARNING: {nan_total} cells without a route (NaN).')
+        print(f'  Affected nodes ({len(affected)}): {affected[:20]}'
+              f'{"..." if len(affected) > 20 else ""}')
+        print('  Possible cause: coordinates off the road network or isolated nodes.')
 
     return mat_dist, mat_dur
 
 
 # ══════════════════════════════════════════════════════════════════
-# Formatacao e escrita
+# Formatting and writing
 # ══════════════════════════════════════════════════════════════════
-def convertir_a_formato_largo(mat_dist: pd.DataFrame, mat_dur: pd.DataFrame) -> pd.DataFrame:
-    registros = [{'origen': o, 'destino': d,
-                  'distancia_km': mat_dist.loc[o, d], 'duracion_min': mat_dur.loc[o, d]}
-                 for o in mat_dist.index for d in mat_dist.columns]
-    return pd.DataFrame(registros)
+def to_long_format(mat_dist: pd.DataFrame, mat_dur: pd.DataFrame) -> pd.DataFrame:
+    records = [{'source': o, 'destination': d,
+                'distance_km': mat_dist.loc[o, d], 'duration_min': mat_dur.loc[o, d]}
+               for o in mat_dist.index for d in mat_dist.columns]
+    return pd.DataFrame(records)
 
 
-def crear_matriz_modelo_numerica(mat_dist, mat_dur, df_nodos) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    mapa = dict(zip(df_nodos['Nodo_matriz'], df_nodos['Nodo_modelo']))
+def build_model_matrices(mat_dist, mat_dur, df_nodes) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    mapping = dict(zip(df_nodes['Matrix_node'], df_nodes['Model_node']))
 
-    def reindexar(df):
+    def reindex(df):
         df = df.copy()
-        df.index = [mapa[x] for x in df.index]
-        df.columns = [mapa[x] for x in df.columns]
+        df.index = [mapping[x] for x in df.index]
+        df.columns = [mapping[x] for x in df.columns]
         return df
 
-    return reindexar(mat_dist), reindexar(mat_dur)
+    return reindex(mat_dist), reindex(mat_dur)
 
 
-def escrever_livro_ors(destino: Path, df_nodos, mat_dist, mat_dur,
-                       mat_dist_modelo, mat_dur_modelo, formato_largo) -> None:
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    with pd.ExcelWriter(destino, engine='openpyxl') as w:
-        df_nodos.to_excel(w, sheet_name='nodos_ordenados', index=False)
-        mat_dist.to_excel(w, sheet_name='distancia_km')
-        mat_dur.to_excel(w, sheet_name='duracion_min')
-        mat_dist_modelo.to_excel(w, sheet_name='distancia_modelo')
-        mat_dur_modelo.to_excel(w, sheet_name='duracion_modelo')
-        formato_largo.to_excel(w, sheet_name='formato_largo', index=False)
-        for sn in ('distancia_km', 'duracion_min', 'distancia_modelo', 'duracion_modelo'):
+def write_ors_workbook(destination: Path, df_nodes, mat_dist, mat_dur,
+                       mat_dist_model, mat_dur_model, long_format) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with pd.ExcelWriter(destination, engine='openpyxl') as w:
+        df_nodes.to_excel(w, sheet_name='ordered_nodes', index=False)
+        mat_dist.to_excel(w, sheet_name='distance_km')
+        mat_dur.to_excel(w, sheet_name='duration_min')
+        mat_dist_model.to_excel(w, sheet_name='distance_model')
+        mat_dur_model.to_excel(w, sheet_name='duration_model')
+        long_format.to_excel(w, sheet_name='long_format', index=False)
+        for sn in ('distance_km', 'duration_min', 'distance_model', 'duration_model'):
             ws = w.sheets[sn]
             for row in ws.iter_rows(min_row=2, min_col=2):
                 for cell in row:
@@ -250,30 +250,30 @@ def escrever_livro_ors(destino: Path, df_nodos, mat_dist, mat_dur,
                         cell.number_format = '0.0000'
 
 
-def gerar_matriz_ors(cfg: Config) -> Path:
-    """Pipeline completo do passo 1. Devolve o caminho do Excel gerado."""
-    entrada = cfg.ruta('coordenadas')
-    saida = cfg.ruta('matriz_ors', criar_pasta=True)
+def build_ors_matrix(cfg: Config) -> Path:
+    """Full step-1 pipeline. Returns the path of the generated Excel file."""
+    source = cfg.path('coordinates')
+    destination = cfg.path('ors_matrix', create_dir=True)
 
-    print(f'Leyendo coordenadas: {entrada}')
-    df = pd.read_excel(entrada, sheet_name=cfg.ors.hoja_excel)
+    print(f'Reading coordinates: {source}')
+    df = pd.read_excel(source, sheet_name=cfg.ors.excel_sheet)
     df.columns = df.columns.astype(str).str.strip()
-    validar_columnas(df)
+    validate_columns(df)
     print(df.head().to_string(), '\n')
 
-    print('Preparando nodos...')
-    df_nodos = preparar_nodos(df)
-    print(f'  {len(df_nodos)} nodos (1 deposito + {len(df_nodos)-1} contenedores)\n')
+    print('Preparing nodes...')
+    df_nodes = prepare_nodes(df)
+    print(f'  {len(df_nodes)} nodes (1 depot + {len(df_nodes)-1} bins)\n')
 
-    print('Generando matrices con OpenRouteService (OpenStreetMap)...')
-    mat_dist, mat_dur = generar_matriz_distancias(df_nodos, cfg.ors)
+    print('Generating matrices with OpenRouteService (OpenStreetMap)...')
+    mat_dist, mat_dur = build_distance_matrix(df_nodes, cfg.ors)
 
-    print('\nConvirtiendo a formato largo...')
-    formato_largo = convertir_a_formato_largo(mat_dist, mat_dur)
-    mat_dist_modelo, mat_dur_modelo = crear_matriz_modelo_numerica(mat_dist, mat_dur, df_nodos)
+    print('\nConverting to long format...')
+    long_format = to_long_format(mat_dist, mat_dur)
+    mat_dist_model, mat_dur_model = build_model_matrices(mat_dist, mat_dur, df_nodes)
 
-    print(f'Guardando: {saida}')
-    escrever_livro_ors(saida, df_nodos, mat_dist, mat_dur,
-                       mat_dist_modelo, mat_dur_modelo, formato_largo)
-    print('Proceso finalizado exitosamente.')
-    return saida
+    print(f'Saving: {destination}')
+    write_ors_workbook(destination, df_nodes, mat_dist, mat_dur,
+                       mat_dist_model, mat_dur_model, long_format)
+    print('Process finished successfully.')
+    return destination

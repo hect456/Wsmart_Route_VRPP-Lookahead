@@ -1,61 +1,65 @@
-# VRPP + Lookahead — recolección selectiva de residuos
+# VRPP + Lookahead — selective waste collection
 
-Proyecto para planificar rutas de recogida de contenedores (papel/cartón, plástico, …)
-combinando:
+Project for planning bin collection routes (paper/cardboard, plastic, …) by
+combining:
 
-1. **Matriz de distancias real** por carretera (OpenRouteService / OpenStreetMap).
-2. **Lookahead**: clasificación de contenedores en `MustGo` / `MustGoLA` / `Opcional`
-   según su nivel actual y su tasa de llenado diaria.
-3. **VRPP** (*Vehicle Routing Problem with Profits*) resuelto con **Gurobi**: se elige
-   *qué* contenedores recoger y en *qué* orden, maximizando el beneficio neto.
+1. **Real road distance matrix** (OpenRouteService / OpenStreetMap).
+2. **Lookahead**: classification of bins into `MustGo` / `MustGoLA` / `Optional`
+   based on their current level and their daily fill rate.
+3. **VRPP** (*Vehicle Routing Problem with Profits*) solved with **Gurobi**: it
+   chooses *which* bins to collect and in *what* order, maximising net profit.
 
-Instancia de referencia incluida: **491 contenedores del clúster C7**
-(Runa – Sobral de Monte Agraço – Arruda dos Vinhos), fracción papel/cartón.
+Reference instance included: **491 bins of cluster C7**
+(Runa – Sobral de Monte Agraço – Arruda dos Vinhos), paper/cardboard fraction.
 
 ---
 
-## 1. Arquitectura
+## 1. Architecture
 
 ```
 vrpp-lookahead/
 ├── config/
-│   └── instancia_491_C7.yaml        ← ÚNICO punto de parametrización
+│   └── instance_491_C7.yaml         ← THE ONLY parameterisation point
 ├── data/
-│   ├── raw/                         ← entradas del usuario
-│   │   ├── coordenadas_491_C7_Runa_Sobral_Arruda.xlsx   (ID_bin | Latitude | Longitude)
-│   │   └── atributos_491_C7_papel.xlsx                  (id_contentor | Si | ai | Vol_cont | Vol_kg | Ncont)
-│   ├── matrices/                    ← salida del paso 1 (matriz ORS)
-│   └── instancias/                  ← salida del paso 2 (libro de 4 hojas)
+│   ├── raw/                         ← user inputs
+│   │   ├── coordinates_491_C7_Runa_Sobral_Arruda.xlsx   (ID_bin | Latitude | Longitude)
+│   │   └── attributes_491_C7_paper.xlsx                 (id_contentor | Si | ai | Vol_cont | Vol_kg | Ncont)
+│   ├── matrices/                    ← step 1 output (ORS matrix)
+│   └── instances/                   ← step 2 output (4-sheet workbook)
 ├── scripts/
-│   ├── 01_gerar_matriz_ors.py
-│   ├── 02_construir_instancia.py
-│   └── 03_correr_vrpp.py
+│   ├── 01_build_ors_matrix.py
+│   ├── 02_build_instance.py
+│   └── 03_run_vrpp.py
 ├── src/vrpp_lookahead/
-│   ├── config.py        parámetros (dataclasses + YAML + overrides CLI)
-│   ├── ors_matrix.py    paso 1 — Matrix API de OpenRouteService
-│   ├── instancia.py     paso 2 — construcción, carga, validación y diagnóstico
-│   ├── lookahead.py     paso 3a — clasificación MustGo / MustGoLA
-│   ├── vrpp.py          paso 3b — modelo MILP en Gurobi
-│   ├── reporting.py     paso 3c — mapas Folium + libro Excel de 10 hojas
-│   └── simulacao.py     paso 3 — ciclo de días
-├── notebooks/VRPP_Lookahead.ipynb   ← cáscara fina sobre el paquete
-└── results/<etiqueta>/              ← rutas, KPI y mapas (no versionado)
+│   ├── config.py        parameters (dataclasses + YAML + CLI overrides)
+│   ├── ors_matrix.py    step 1 — OpenRouteService Matrix API
+│   ├── instance.py      step 2 — building, loading, validation and diagnostics
+│   ├── lookahead.py     step 3a — MustGo / MustGoLA classification
+│   ├── vrpp.py          step 3b — MILP model in Gurobi
+│   ├── reporting.py     step 3c — Folium maps + 10-sheet Excel workbook
+│   └── simulation.py    step 3 — day loop
+├── notebooks/VRPP_Lookahead.ipynb   ← thin shell over the package
+└── results/<label>/                 ← routes, KPI and maps (not versioned)
 ```
 
-Reglas de diseño que hacen el proyecto **estable y reutilizable**:
+Design rules that keep the project **stable and reusable**:
 
-| Regla | Dónde |
+| Rule | Where |
 |---|---|
-| Un solo punto de parametrización; ningún número mágico en el código | `config/*.yaml` |
-| Sin estado global: todo viaja en `Config` / `Instancia` / `Solucao` | `src/` |
-| Validación temprana con mensajes claros (IDs duplicados, NaN, orden de matrices) | `instancia.py` |
-| Cero valores de referencia *hard-coded* (todos los totales se calculan del fichero) | `instancia.py`, `reporting.py` |
-| Nombres de hojas y claves KPI idénticos entre instancias → resultados comparables | `reporting.py` |
-| Claves API fuera del código (`.env`, ignorado por Git) | `config.ORS.api_key()` |
+| A single parameterisation point; no magic numbers in the code | `config/*.yaml` |
+| No global state: everything travels in `Config` / `Instance` / `Solution` | `src/` |
+| Early validation with clear messages (duplicate IDs, NaN, matrix order) | `instance.py` |
+| Zero *hard-coded* reference values (every total is computed from the file) | `instance.py`, `reporting.py` |
+| Identical sheet names and KPI keys across instances → comparable results | `reporting.py` |
+| API keys outside the code (`.env`, ignored by Git) | `config.ORS.api_key()` |
 
-> El **algoritmo no ha cambiado**: `ors_matrix.py` es un porte directo de
-> `calcular_matriz_ORS.py`, y `vrpp.py` + `lookahead.py` reproducen exactamente el
-> modelo de los notebooks `VRPP_Lookahead_*`. Lo único que cambió es la estructura.
+> The **algorithm has not changed**: `ors_matrix.py` is a direct port of
+> `calcular_matriz_ORS.py`, and `vrpp.py` + `lookahead.py` reproduce exactly the
+> model of the `VRPP_Lookahead_*` notebooks. Only the structure changed.
+
+> **Column names in Portuguese.** `id_contentor | Si | ai | Vol_cont | Vol_kg | Ncont`
+> come from the raw Excel files supplied by the user, so they are kept as they are.
+> Everything else — code, sheet names, KPI keys, CLI flags — is in English.
 
 ---
 
@@ -63,216 +67,218 @@ Reglas de diseño que hacen el proyecto **estable y reutilizable**:
 
 ```mermaid
 flowchart LR
-    A["coordenadas.xlsx<br/>ID_bin | Lat | Lon"] --> P1["paso 1<br/>ORS Matrix API"]
-    P1 --> M["matriz_..._ORS.xlsx<br/>distancia_km · duracion_min"]
-    B["atributos.xlsx<br/>Si · ai · Vol_cont · Vol_kg · Ncont"] --> P2["paso 2<br/>construir instancia"]
+    A["coordinates.xlsx<br/>ID_bin | Lat | Lon"] --> P1["step 1<br/>ORS Matrix API"]
+    P1 --> M["distance_matrix_..._ORS.xlsx<br/>distance_km · duration_min"]
+    B["attributes.xlsx<br/>Si · ai · Vol_cont · Vol_kg · Ncont"] --> P2["step 2<br/>build instance"]
     A --> P2
     M --> P2
-    P2 --> I["instancia.xlsx<br/>contentores · LatLong<br/>matrizdistancias · matrizmin"]
-    I --> P3["paso 3<br/>Lookahead + VRPP (Gurobi)"]
-    P3 --> R["results/<br/>rutas · KPI · mapas"]
+    P2 --> I["instance.xlsx<br/>bins · LatLong<br/>distance_matrix · time_matrix"]
+    I --> P3["step 3<br/>Lookahead + VRPP (Gurobi)"]
+    P3 --> R["results/<br/>routes · KPI · maps"]
 ```
 
-### Paso 1 — matriz de distancias (OpenRouteService)
+### Step 1 — distance matrix (OpenRouteService)
 
-Consulta la *Matrix API* por bloques de orígenes; el tamaño del bloque se calcula
-automáticamente como `floor(max_routes_per_request / n)` para no superar nunca el
-límite del servidor. Produce un libro con 6 hojas: `nodos_ordenados`, `distancia_km`
-(km), `duracion_min` (min), `distancia_modelo`, `duracion_modelo`, `formato_largo`.
+Queries the *Matrix API* in blocks of sources; the block size is computed
+automatically as `floor(max_routes_per_request / n)` so the server limit is never
+exceeded. Produces a workbook with 6 sheets: `ordered_nodes`, `distance_km`
+(km), `duration_min` (min), `distance_model`, `duration_model`, `long_format`.
 
 ```bash
-python scripts/01_gerar_matriz_ors.py --config config/instancia_491_C7.yaml
+python scripts/01_build_ors_matrix.py --config config/instance_491_C7.yaml
 ```
 
-> **Solo hace falta una vez por conjunto de coordenadas.** Para la instancia 491_C7
-> la matriz ya está en `data/matrices/`, así que puedes saltar directamente al paso 2.
+> **Only needed once per set of coordinates.** For instance 491_C7 the matrix is
+> already in `data/matrices/`, so you can jump straight to step 2.
 
-### Paso 2 — construir la instancia
+### Step 2 — build the instance
 
-Combina atributos + coordenadas + matriz ORS en el libro de 4 hojas que consume el
-VRPP. El orden de los nodos es el de la matriz ORS (depósito `id = 0` primero), lo que
-garantiza `matrizdistancias.index[1:] == contentores.id_contentor`.
+Combines attributes + coordinates + ORS matrix into the 4-sheet workbook consumed
+by the VRPP. The node order is the one of the ORS matrix (depot `id = 0` first),
+which guarantees `distance_matrix.index[1:] == bins.id_contentor`.
 
 ```bash
-python scripts/02_construir_instancia.py --config config/instancia_491_C7.yaml
+python scripts/02_build_instance.py --config config/instance_491_C7.yaml
 ```
 
-### Paso 3 — Lookahead + VRPP
+### Step 3 — Lookahead + VRPP
 
 ```bash
-python scripts/03_correr_vrpp.py --config config/instancia_491_C7.yaml
-python scripts/03_correr_vrpp.py --so-diagnostico          # clasifica sin optimizar
-python scripts/03_correr_vrpp.py --Q 5000 --MAX_ROTAS 3    # sobrescribe parámetros
+python scripts/03_run_vrpp.py --config config/instance_491_C7.yaml
+python scripts/03_run_vrpp.py --diagnose-only              # classify without optimising
+python scripts/03_run_vrpp.py --Q 5000 --MAX_ROUTES 3      # override parameters
 ```
 
 ---
 
-## 3. Parámetros editables
+## 3. Editable parameters
 
-Se editan en el YAML o, puntualmente, por línea de comandos. Los de la sección
-`modelo` son los que se tocan con más frecuencia:
+They are edited in the YAML or, occasionally, on the command line. The ones in
+the `model` section are the most frequently touched:
 
-| Parámetro | Significado | Unidad | Por defecto | Flag CLI |
+| Parameter | Meaning | Unit | Default | CLI flag |
 |---|---|---|---|---|
-| `B` | densidad de los residuos | kg/m³ | 16 | `--B` |
-| `Q` | capacidad del vehículo | kg | 3500 | `--Q` |
-| `R` | ingreso por kg recogido | €/kg | 0.1625 | `--R` |
-| `C` | coste de desplazamiento | €/km | 1.0 | `--C` |
-| `OMEGA` | coste fijo por vehículo | € | 0.1 | `--OMEGA` |
-| `MAX_ROTAS` | nº máximo de rutas (`k ≤ MAX_ROTAS`) | — | 2 | `--MAX_ROTAS` |
-| `MIP_GAP` | tolerancia del solver | — | 0.05 (5 %) | `--MIP_GAP` |
-| `TIME_LIMIT` | tiempo máximo del solver | s | 21600 (6 h) | `--TIME_LIMIT` |
+| `B` | waste density | kg/m³ | 16 | `--B` |
+| `Q` | vehicle capacity | kg | 3500 | `--Q` |
+| `R` | revenue per kg collected | €/kg | 0.1625 | `--R` |
+| `C` | travel cost | €/km | 1.0 | `--C` |
+| `OMEGA` | fixed cost per vehicle | € | 0.1 | `--OMEGA` |
+| `MAX_ROUTES` | max number of routes (`k ≤ MAX_ROUTES`) | — | 2 | `--MAX_ROUTES` |
+| `MIP_GAP` | solver tolerance | — | 0.05 (5 %) | `--MIP_GAP` |
+| `TIME_LIMIT` | solver time limit | s | 21600 (6 h) | `--TIME_LIMIT` |
 
-Otros bloques:
+Other blocks:
 
-| Bloque | Parámetro | Significado |
+| Block | Parameter | Meaning |
 |---|---|---|
-| `lookahead` | `dias` | días simulados |
-| | `janela` | horizonte de anticipación (días) |
-| | `threshold_mg` | % para clasificar como `MustGo` |
-| | `threshold_overflow` | % para clasificar como `MustGoLA` |
-| `solver` | `knn` | vecinos más cercanos por nodo (filtrado de arcos) |
-| | `seed` | semilla de Gurobi (`null` = por defecto) |
-| | `preservar_arcos_mustgo` | `true` = nunca filtrar arcos MustGo–MustGo |
-| | `gerar_mapas` | generar los mapas Folium |
-| `ors` | `modo_transporte` | `driving-hgv`, `driving-car`, `cycling-regular`, … |
-| | `max_routes_per_request` | límite de rutas por petición del servidor ORS |
-| | `pausa_s` | pausa entre peticiones (plan gratuito: ≤ 40/min) |
+| `lookahead` | `days` | simulated days |
+| | `window` | lookahead horizon (days) |
+| | `threshold_mg` | % for classifying as `MustGo` |
+| | `threshold_overflow` | % for classifying as `MustGoLA` |
+| `solver` | `knn` | nearest neighbours per node (arc filtering) |
+| | `seed` | Gurobi seed (`null` = default) |
+| | `keep_mustgo_arcs` | `true` = never filter out MustGo–MustGo arcs |
+| | `generate_maps` | generate the Folium maps |
+| `ors` | `transport_mode` | `driving-hgv`, `driving-car`, `cycling-regular`, … |
+| | `max_routes_per_request` | ORS server limit of routes per request |
+| | `pause_s` | pause between requests (free plan: ≤ 40/min) |
 
-`parametros_usados.json` se escribe en la carpeta de resultados de cada corrida:
-cada resultado queda trazable a los parámetros exactos que lo generaron.
+`parameters_used.json` is written into the results folder of every run: each
+result is traceable back to the exact parameters that produced it.
 
 ---
 
-## 4. Modelo
+## 4. Model
 
-**Magnitudes derivadas** (definidas una sola vez, en `instancia.py`):
-
-```
-CAP_CONT_i = B · Ncont_i · Vol_cont_i     capacidad del punto      [kg]
-Si_kg_i    = Vol_kg_i                     nivel actual             [kg]
-ai_kg_i    = ai_i/100 · CAP_CONT_i        acumulación diaria       [kg/día]
-```
-
-**Clasificación (lookahead)**
+**Derived quantities** (defined once, in `instance.py`):
 
 ```
-MustGo    : nivel_i + ai_kg_i        ≥ threshold_mg/100       · CAP_CONT_i
-MustGoLA  : nivel_i + ai_kg_i · k    ≥ threshold_overflow/100 · CAP_CONT_i,  k = 2..janela
+CAP_CONT_i = B · Ncont_i · Vol_cont_i     capacity of the point    [kg]
+Si_kg_i    = Vol_kg_i                     current level            [kg]
+ai_kg_i    = ai_i/100 · CAP_CONT_i        daily accumulation       [kg/day]
+```
+
+**Classification (lookahead)**
+
+```
+MustGo    : level_i + ai_kg_i        ≥ threshold_mg/100       · CAP_CONT_i
+MustGoLA  : level_i + ai_kg_i · k    ≥ threshold_overflow/100 · CAP_CONT_i,  k = 2..window
 ```
 
 **VRPP**
 
 ```
 max   R · Σ_i S_i·g_i  −  C · Σ_ij D_ij·x_ij  −  OMEGA · k
-s.a.  k ≤ MAX_ROTAS
-      g_i = 1                          para todo MustGo / MustGoLA
-      grado de entrada = grado de salida = g_i
-      Σ y_ij − Σ y_ji = S_i·g_i        (carga recogida; y_ij ≤ Q·x_ij, vehículos salen vacíos)
-      flujo unitario f_ij              (eliminación de subrutas)
+s.t.  k ≤ MAX_ROUTES
+      g_i = 1                          for every MustGo / MustGoLA
+      in-degree = out-degree = g_i
+      Σ y_ij − Σ y_ji = S_i·g_i        (load collected; y_ij ≤ Q·x_ij, vehicles leave empty)
+      unit flow f_ij                   (subtour elimination)
 ```
 
-*Preprocesamiento:* filtrado de arcos por KNN bidireccional + eliminación de pares que
-superan `Q`; arranque en caliente (vecino más cercano sobre los MustGo).
+*Pre-processing:* arc filtering by bidirectional KNN + removal of pairs that
+exceed `Q`; warm start (nearest neighbour over the MustGo points).
 
-*Ajuste automático de MustGo:* si el peso de los MustGo supera `MAX_ROTAS · Q`, los
-menos llenos (en % de `CAP_CONT`) se degradan a `Opcional` — sin esto el modelo sería
-inviable. El solver todavía puede recogerlos si resultan rentables, y quedan
-registrados con el motivo `MG_rebaixado_frota_cheia`.
+*Automatic MustGo adjustment:* if the weight of the MustGo exceeds
+`MAX_ROUTES · Q`, the least full ones (as a % of `CAP_CONT`) are downgraded to
+`Optional` — without this the model would be infeasible. The solver may still
+collect them if they turn out to be profitable, and they are recorded with the
+reason `MG_downgraded_fleet_full`.
 
 ---
 
-## 5. Salidas
+## 5. Outputs
 
-Por cada día simulado, en `results/<etiqueta>/Dia_XX/`:
+For every simulated day, in `results/<label>/Day_XX/`:
 
-* `rota_N.html` — mapa Folium con la secuencia de paradas (rojo = MustGo,
-  naranja = MustGoLA, azul = Opcional, casa = depósito).
-* `resultado_Dia_XX.xlsx` — 10 hojas:
+* `route_N.html` — Folium map with the stop sequence (red = MustGo,
+  orange = MustGoLA, blue = Optional, house = depot).
+* `result_Day_XX.xlsx` — 10 sheets:
 
-| Hoja | Contenido |
+| Sheet | Content |
 |---|---|
-| `1_Lookahead` | nivel, previsión y grupo de cada contenedor |
-| `2_KPI_Geral` | función objetivo, residuos, contenedores, rutas, solver |
-| `3_KPI_Rotas` | una fila por ruta, con la secuencia completa |
-| `4_RotaN_Seq` | secuencia detallada de cada ruta |
-| `5_MustGo` / `6_MustGoLA` | puntos críticos y si fueron recogidos |
-| `7_Nao_Visitados` | no visitados y el motivo |
-| `8_Todos_Contentores` | estado de los 491 puntos |
-| `9_Parametros` | parámetros de la corrida |
-| `10_Verificacao` | comprobaciones de capacidad, arcos, gap |
+| `1_Lookahead` | level, forecast and group of each bin |
+| `2_KPI_General` | objective function, waste, bins, routes, solver |
+| `3_KPI_Routes` | one row per route, with the full sequence |
+| `4_RouteN_Seq` | detailed sequence of each route |
+| `5_MustGo` / `6_MustGoLA` | critical points and whether they were collected |
+| `7_Not_Visited` | not visited and the reason why |
+| `8_All_Bins` | status of all 491 points |
+| `9_Parameters` | parameters of the run |
+| `10_Verification` | capacity, arc and gap checks |
 
-Y en la raíz de la instancia: `resumo_<etiqueta>_todos_dias.xlsx` (KPI por día,
-KPI consolidados y diagnóstico) + `parametros_usados.json`.
+And at the root of the instance: `summary_<label>_all_days.xlsx` (KPI per day,
+consolidated KPI and diagnostics) + `parameters_used.json`.
 
 ---
 
-## 6. Instalación
+## 6. Installation
 
 ```bash
-git clone <url-del-repo>
+git clone <repo-url>
 cd vrpp-lookahead
 
 python -m venv .venv
-.venv\Scripts\activate            # Windows;  source .venv/bin/activate en Linux/macOS
+.venv\Scripts\activate            # Windows;  source .venv/bin/activate on Linux/macOS
 pip install -r requirements.txt
 
-copy .env.example .env            # y pon dentro tu ORS_API_KEY (solo para el paso 1)
+copy .env.example .env            # and put your ORS_API_KEY inside (only for step 1)
 ```
 
-Requisitos externos:
+External requirements:
 
-* **Gurobi** con licencia válida (la licencia gratuita *size-limited* no basta para
-  491 contenedores; académica o comercial sí).
-* **Clave de OpenRouteService** — registro gratuito en
-  <https://openrouteservice.org/dev/#/signup>. Solo se necesita para el paso 1.
+* **Gurobi** with a valid licence (the free *size-limited* licence is not enough
+  for 491 bins; an academic or commercial one is).
+* **OpenRouteService key** — free sign-up at
+  <https://openrouteservice.org/dev/#/signup>. Only needed for step 1.
 
 ---
 
-## 7. Añadir una instancia nueva
+## 7. Adding a new instance
 
-1. Pon en `data/raw/` el fichero de coordenadas (`ID_bin | Latitude | Longitude`,
-   con el depósito como `ID_bin = 0`) y el de atributos
+1. Put in `data/raw/` the coordinates file (`ID_bin | Latitude | Longitude`,
+   with the depot as `ID_bin = 0`) and the attributes file
    (`id_contentor | Si | ai | Vol_cont | Vol_kg | Ncont`).
-2. Copia `config/instancia_491_C7.yaml` → `config/instancia_XXX.yaml` y cambia
-   `etiqueta` y `rutas`.
-3. Ejecuta los pasos 1 → 2 → 3 con `--config config/instancia_XXX.yaml`.
+2. Copy `config/instance_491_C7.yaml` → `config/instance_XXX.yaml` and change
+   `label` and `paths`.
+3. Run steps 1 → 2 → 3 with `--config config/instance_XXX.yaml`.
 
-No hay que tocar el código: los tres pasos son agnósticos del tamaño de la instancia.
+No code changes are needed: the three steps are agnostic to the instance size.
 
 ---
 
-## 8. Conectar con GitHub
+## 8. Connecting to GitHub
 
 ```bash
-git init                       # ya hecho si el repo se creó con este proyecto
+git init                       # already done if the repo was created with this project
 git add .
-git commit -m "VRPP + Lookahead: estructura inicial"
+git commit -m "VRPP + Lookahead: initial structure"
 git branch -M main
-git remote add origin https://github.com/<usuario>/<repo>.git
+git remote add origin https://github.com/<user>/<repo>.git
 git push -u origin main
 ```
 
-`.gitignore` excluye `.env`, `results/` y los Excel **generados**
-(`data/matrices/*.xlsx`, `data/instancias/*.xlsx`) porque son pesados y reproducibles
-con los pasos 1 y 2. Si quieres versionar uno concreto:
+`.gitignore` excludes `.env`, `results/` and the **generated** Excel files
+(`data/matrices/*.xlsx`, `data/instances/*.xlsx`) because they are heavy and
+reproducible with steps 1 and 2. To version a specific one:
 
 ```bash
-git add -f data/matrices/matriz_distancias_491_C7_Runa_Sobral_Arruda_ORS.xlsx
+git add -f data/matrices/distance_matrix_491_C7_Runa_Sobral_Arruda_ORS.xlsx
 ```
 
-> **Seguridad:** la clave ORS que estaba escrita dentro de `calcular_matriz_ORS.py`
-> ya no aparece en el código. Como estuvo en texto plano, conviene **regenerarla**
-> en el panel de OpenRouteService antes de publicar el repositorio.
+> **Security:** the ORS key that used to be written inside
+> `calcular_matriz_ORS.py` is no longer in the code. Since it was in plain text,
+> it is worth **regenerating** it in the OpenRouteService dashboard before
+> publishing the repository.
 
 ---
 
-## 9. Origen del código
+## 9. Origin of the code
 
-| Este proyecto | Fichero original |
+| This project | Original file |
 |---|---|
 | `src/vrpp_lookahead/ors_matrix.py` | `PhDtese/Matriz_Distances/calcular_matriz_ORS.py` |
-| `src/vrpp_lookahead/{lookahead,vrpp,reporting,simulacao}.py` | `cenario4 Papel/…/VRPP_Lookahead_536_riomaior_2rotas.ipynb` |
-| `data/raw/coordenadas_491_C7_*.xlsx` | `Contentores_491_C7_ Runa_Sobral_Arruda_papel.xlsx` |
-| `data/matrices/matriz_distancias_491_C7_*_ORS.xlsx` | `matriz_distancias_491_C7_Runa_Sobral_Arruda_ORS.xlsx` |
-| `data/raw/atributos_491_C7_papel.xlsx` | hoja `contentores` de `Contentores491_C7_papel.xlsx` |
+| `src/vrpp_lookahead/{lookahead,vrpp,reporting,simulation}.py` | `cenario4 Papel/…/VRPP_Lookahead_536_riomaior_2rotas.ipynb` |
+| `data/raw/coordinates_491_C7_*.xlsx` | `Contentores_491_C7_ Runa_Sobral_Arruda_papel.xlsx` |
+| `data/matrices/distance_matrix_491_C7_*_ORS.xlsx` | `matriz_distancias_491_C7_Runa_Sobral_Arruda_ORS.xlsx` |
+| `data/raw/attributes_491_C7_paper.xlsx` | sheet `contentores` of `Contentores491_C7_papel.xlsx` |

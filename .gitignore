@@ -1,12 +1,12 @@
-# Segredos
+# Secrets
 .env
 
-# Dados gerados (reprodutiveis pelos passos 1 e 2) — pesados demais para o Git.
-# Se quiser versionar um ficheiro concreto: git add -f data/matrices/<ficheiro>.xlsx
+# Generated data (reproducible with steps 1 and 2) — too heavy for Git.
+# To version a specific file: git add -f data/matrices/<file>.xlsx
 data/matrices/*.xlsx
-data/instancias/*.xlsx
+data/instances/*.xlsx
 
-# Resultados das corridas
+# Run results
 results/
 *.log
 gurobi.log
@@ -22,11 +22,11 @@ build/
 dist/
 .ipynb_checkpoints/
 
-# Excel/Office temporarios
+# Excel/Office temporaries
 ~$*.xlsx
 ~$*.docx
 
-# Editores / SO
+# Editors / OS
 .vscode/
 .idea/
 .DS_Store

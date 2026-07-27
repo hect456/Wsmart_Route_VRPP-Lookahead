@@ -1,17 +1,17 @@
-# Nucleo
+# Core
 pandas>=2.0
 numpy>=1.24
 openpyxl>=3.1
 PyYAML>=6.0
 
-# Matriz de distancias (passo 1)
+# Distance matrix (step 1)
 requests>=2.31
 
-# Optimizacao (passo 3) — necessita licenca Gurobi para instancias grandes
+# Optimisation (step 3) — needs a Gurobi licence for large instances
 gurobipy>=11.0
 
-# Mapas
+# Maps
 folium>=0.15
 
-# Notebooks (opcional)
+# Notebooks (optional)
 jupyter>=1.0

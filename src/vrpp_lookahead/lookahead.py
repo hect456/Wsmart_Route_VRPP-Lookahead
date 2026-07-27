@@ -1,9 +1,9 @@
-"""Passo 3a — Lookahead: classificacao MustGo / MustGoLA.
+"""Step 3a — Lookahead: MustGo / MustGoLA classification.
 
-    MustGo   : nivel_kg + ai_kg      >= THRESHOLD_MG/100       * CAP_CONT_i
-    MustGoLA : nivel_kg + ai_kg * k  >= THRESHOLD_OVERFLOW/100 * CAP_CONT_i,  k = 2..janela
+    MustGo   : level_kg + ai_kg      >= THRESHOLD_MG/100       * CAP_CONT_i
+    MustGoLA : level_kg + ai_kg * k  >= THRESHOLD_OVERFLOW/100 * CAP_CONT_i,  k = 2..window
 
-Funcao pura: (estado, instancia, config) -> ResultadoLookahead.
+Pure function: (state, instance, config) -> LookaheadResult.
 """
 from __future__ import annotations
 
@@ -13,60 +13,60 @@ import numpy as np
 import pandas as pd
 
 from .config import Config
-from .instancia import Instancia
+from .instance import Instance
 
 
 @dataclass
-class ResultadoLookahead:
+class LookaheadResult:
     mustgo: list
     mustgo_la: list
-    detalhe: pd.DataFrame
+    detail: pd.DataFrame
 
     @property
-    def todos(self) -> set:
+    def all_ids(self) -> set:
         return set(self.mustgo) | set(self.mustgo_la)
 
 
-def lookahead(estado: pd.DataFrame, inst: Instancia, cfg: Config,
-              verboso: bool = True) -> ResultadoLookahead:
+def lookahead(state: pd.DataFrame, inst: Instance, cfg: Config,
+              verbose: bool = True) -> LookaheadResult:
     la = cfg.lookahead
-    df = estado.merge(inst.cont[['id_contentor', 'ai', 'ai_kg', 'CAP_CONT']],
-                      on='id_contentor', how='left')
-    assert df['CAP_CONT'].notna().all(), 'estado com ids ausentes na instancia'
+    df = state.merge(inst.bins[['id_contentor', 'ai', 'ai_kg', 'CAP_CONT']],
+                     on='id_contentor', how='left')
+    assert df['CAP_CONT'].notna().all(), 'state contains ids missing from the instance'
 
     thr = la.threshold_mg / 100.0 * df['CAP_CONT']
     ovf = la.threshold_overflow / 100.0 * df['CAP_CONT']
 
-    df['Nivel_Atual_pct'] = df['nivel_kg'] / df['CAP_CONT'] * 100.0
-    df['prev_d1_kg'] = df['nivel_kg'] + df['ai_kg']
-    df['prev_d1_pct'] = df['prev_d1_kg'] / df['CAP_CONT'] * 100.0
+    df['Current_Level_pct'] = df['level_kg'] / df['CAP_CONT'] * 100.0
+    df['fc_d1_kg'] = df['level_kg'] + df['ai_kg']
+    df['fc_d1_pct'] = df['fc_d1_kg'] / df['CAP_CONT'] * 100.0
 
-    e_mg = (df['prev_d1_kg'] >= thr).to_numpy()
-    if la.janela >= 2:
-        futuros = np.any([(df['nivel_kg'] + df['ai_kg'] * k) >= ovf
-                          for k in range(2, la.janela + 1)], axis=0)
+    is_mg = (df['fc_d1_kg'] >= thr).to_numpy()
+    if la.window >= 2:
+        future = np.any([(df['level_kg'] + df['ai_kg'] * k) >= ovf
+                         for k in range(2, la.window + 1)], axis=0)
     else:
-        futuros = np.zeros(len(df), dtype=bool)
-    e_la = ~e_mg & futuros
+        future = np.zeros(len(df), dtype=bool)
+    is_la = ~is_mg & future
 
-    mustgo = df.loc[e_mg, 'id_contentor'].tolist()
-    mustgo_la = df.loc[e_la, 'id_contentor'].tolist()
-    df['Grupo'] = np.where(e_mg, 'MustGo', np.where(e_la, 'MustGoLA', 'Nao_MG'))
+    mustgo = df.loc[is_mg, 'id_contentor'].tolist()
+    mustgo_la = df.loc[is_la, 'id_contentor'].tolist()
+    df['Group'] = np.where(is_mg, 'MustGo', np.where(is_la, 'MustGoLA', 'Not_MG'))
 
-    if verboso:
-        n_overflow = int((df['nivel_kg'] >= df['CAP_CONT']).sum())
-        print(f'  Em overflow AGORA (nivel>=CAP_CONT_i): {n_overflow}')
-        print(f'  MustGo  (overflow amanha)             : {len(mustgo)}')
-        print(f'  MustGoLA (janela {la.janela} dias)              : {len(mustgo_la)}')
-        print(f'  Total MG                              : {len(mustgo) + len(mustgo_la)}')
+    if verbose:
+        n_overflow = int((df['level_kg'] >= df['CAP_CONT']).sum())
+        print(f'  Overflowing NOW (level>=CAP_CONT_i)  : {n_overflow}')
+        print(f'  MustGo  (overflowing tomorrow)       : {len(mustgo)}')
+        print(f'  MustGoLA ({la.window}-day window)              : {len(mustgo_la)}')
+        print(f'  Total MG                             : {len(mustgo) + len(mustgo_la)}')
 
-    detalhe = df[['id_contentor', 'CAP_CONT', 'Nivel_Atual_pct', 'nivel_kg',
-                  'ai', 'ai_kg', 'prev_d1_pct', 'prev_d1_kg', 'Grupo']].rename(columns={
-        'nivel_kg': 'Nivel_Atual_kg',
-        'ai': 'Taxa_dia_pct',
-        'ai_kg': 'Taxa_dia_kg',
-        'prev_d1_pct': 'Previsto_amanha_pct',
-        'prev_d1_kg': 'Previsto_amanha_kg',
+    detail = df[['id_contentor', 'CAP_CONT', 'Current_Level_pct', 'level_kg',
+                 'ai', 'ai_kg', 'fc_d1_pct', 'fc_d1_kg', 'Group']].rename(columns={
+        'level_kg': 'Current_Level_kg',
+        'ai': 'Daily_Rate_pct',
+        'ai_kg': 'Daily_Rate_kg',
+        'fc_d1_pct': 'Forecast_tomorrow_pct',
+        'fc_d1_kg': 'Forecast_tomorrow_kg',
     }).copy()
 
-    return ResultadoLookahead(mustgo=mustgo, mustgo_la=mustgo_la, detalhe=detalhe)
+    return LookaheadResult(mustgo=mustgo, mustgo_la=mustgo_la, detail=detail)

@@ -1,28 +1,28 @@
-"""VRPP + Lookahead — recolha selectiva de residuos com matriz de distancias ORS.
+"""VRPP + Lookahead — selective waste collection with an ORS distance matrix.
 
 Pipeline:
-    1. ors_matrix.gerar_matriz_ors(cfg)      coordenadas   -> matriz ORS (km / min)
-    2. instancia.construir_instancia(cfg)    atributos + coordenadas + matriz -> instancia
-    3. simulacao.correr(cfg)                 instancia -> rotas, KPI, mapas
+    1. ors_matrix.build_ors_matrix(cfg)   coordinates -> ORS matrix (km / min)
+    2. instance.build_instance(cfg)       attributes + coordinates + matrix -> instance
+    3. simulation.run(cfg)                instance -> routes, KPI, maps
 
-Todos os parametros vivem em `config.Config` (ficheiro YAML em config/).
+Every parameter lives in `config.Config` (YAML file under config/).
 """
-from .config import Config, Lookahead, Modelo, ORS, Rutas, Solver
-from .instancia import Instancia, carregar_instancia, construir_instancia, diagnosticar, resumo_instancia
-from .lookahead import ResultadoLookahead, lookahead
-from .ors_matrix import gerar_matriz_ors
-from .reporting import exportar_excel, exportar_resumo, plotar_rotas
-from .simulacao import correr, simular
-from .vrpp import Solucao, resolver_vrpp
+from .config import Config, Lookahead, Model, ORS, Paths, Solver
+from .instance import Instance, build_instance, diagnose, instance_summary, load_instance
+from .lookahead import LookaheadResult, lookahead
+from .ors_matrix import build_ors_matrix
+from .reporting import export_excel, export_summary, plot_routes
+from .simulation import run, simulate
+from .vrpp import Solution, solve_vrpp
 
 __version__ = '1.0.0'
 
 __all__ = [
-    'Config', 'Modelo', 'Lookahead', 'Solver', 'ORS', 'Rutas',
-    'Instancia', 'construir_instancia', 'carregar_instancia', 'resumo_instancia', 'diagnosticar',
-    'lookahead', 'ResultadoLookahead',
-    'resolver_vrpp', 'Solucao',
-    'plotar_rotas', 'exportar_excel', 'exportar_resumo',
-    'simular', 'correr',
-    'gerar_matriz_ors',
+    'Config', 'Model', 'Lookahead', 'Solver', 'ORS', 'Paths',
+    'Instance', 'build_instance', 'load_instance', 'instance_summary', 'diagnose',
+    'lookahead', 'LookaheadResult',
+    'solve_vrpp', 'Solution',
+    'plot_routes', 'export_excel', 'export_summary',
+    'simulate', 'run',
+    'build_ors_matrix',
 ]

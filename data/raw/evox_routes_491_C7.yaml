@@ -1,0 +1,31 @@
+# EVOX solution for instance 491_C7 — bin ids in VISIT ORDER.
+# The depot (id 0) is implicit: every route starts and ends there.
+routes:
+  1: [1347, 666, 3387, 670, 3868, 523, 9850, 521, 2669, 2147,
+      7502, 519, 514, 513, 3843, 488, 4382, 483, 2646, 281,
+      3915, 282, 2702, 1791, 285, 284, 9624, 1297, 2810, 3900,
+      938, 3188, 1615, 1877, 3888, 1814, 3904, 3924, 5144, 5642,
+      2721, 2622, 268, 3890, 1364, 477, 491, 711, 494, 495,
+      712, 9748, 498, 499, 682, 9926, 679, 678, 681, 687,
+      4209, 3399, 689, 3386]
+  2: [263, 6258, 2323, 290, 1612, 291, 266, 6165, 3881, 310,
+      1122, 3966, 8876, 6250, 299, 6253, 293, 3975, 295, 297,
+      333, 5145, 2668, 2298, 338, 2577, 4408, 2634, 2324, 331,
+      1610, 332, 3931, 5442, 3930, 313, 3928, 3192, 3929, 6255,
+      1611, 2879, 2878, 3926, 3927, 1233, 316, 2876, 318, 3936,
+      2578, 320, 3937, 3969, 329, 324, 2058, 3952, 4274, 3951,
+      6068, 3808, 1505, 3846]
+
+# KPI as reported by EVOX itself, for the left block of the comparison report.
+# Fill in what you have; anything left as null is shown blank and excluded from
+# the "Differences" column.
+reported:
+  1: {n_bins: 64, n_mustgo: null, n_mustgo_la: null, n_optional: null,
+      weight_kg: 2396.5, distance_km: 145.0, profit_euro: 244.43,
+      km_per_ton: 60.5, cap_used_pct: null, travel_time_min: 314}   # 05:14
+  2: {n_bins: 64, n_mustgo: null, n_mustgo_la: null, n_optional: null,
+      weight_kg: 2520.4, distance_km: 186.0, profit_euro: 223.57,
+      km_per_ton: 73.8, cap_used_pct: null, travel_time_min: 307}   # 05:07
+  # Totals derived from the two routes above (EVOX reports per route only).
+  totals: {n_not_visited: null, total_distance_km: 331.0, total_weight_kg: 4916.9,
+           total_profit_euro: 468.0, total_km_per_ton: 67.3193}

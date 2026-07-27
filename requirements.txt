@@ -1,0 +1,17 @@
+# Nucleo
+pandas>=2.0
+numpy>=1.24
+openpyxl>=3.1
+PyYAML>=6.0
+
+# Matriz de distancias (passo 1)
+requests>=2.31
+
+# Optimizacao (passo 3) — necessita licenca Gurobi para instancias grandes
+gurobipy>=11.0
+
+# Mapas
+folium>=0.15
+
+# Notebooks (opcional)
+jupyter>=1.0

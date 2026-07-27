@@ -1,0 +1,33 @@
+# Segredos
+.env
+
+# Dados gerados (reprodutiveis pelos passos 1 e 2) — pesados demais para o Git.
+# Se quiser versionar um ficheiro concreto: git add -f data/matrices/<ficheiro>.xlsx
+data/matrices/*.xlsx
+data/instancias/*.xlsx
+
+# Resultados das corridas
+results/
+*.log
+gurobi.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+.ipynb_checkpoints/
+
+# Excel/Office temporarios
+~$*.xlsx
+~$*.docx
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

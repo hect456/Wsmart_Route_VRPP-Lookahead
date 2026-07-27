@@ -1,0 +1,62 @@
+# ══════════════════════════════════════════════════════════════════
+# Instancia 491_C7 — papel/cartao, cluster C7 (Runa / Sobral / Arruda)
+#
+# Este ficheiro e o UNICO ponto de parametrizacao. Para outra instancia
+# copie-o (config/instancia_XXX.yaml), mude `etiqueta` e `rutas`, e corra:
+#
+#   python scripts/01_gerar_matriz_ors.py     --config config/instancia_XXX.yaml
+#   python scripts/02_construir_instancia.py  --config config/instancia_XXX.yaml
+#   python scripts/03_correr_vrpp.py          --config config/instancia_XXX.yaml
+# ══════════════════════════════════════════════════════════════════
+etiqueta: 491_C7
+descricao: 491 contentores de papel/cartao, cluster C7 (Runa, Sobral de Monte Agraco, Arruda dos Vinhos)
+
+# Caminhos relativos a raiz do projecto (ou absolutos).
+rutas:
+  coordenadas: data/raw/coordenadas_491_C7_Runa_Sobral_Arruda.xlsx      # ID_bin | Latitude | Longitude
+  atributos:   data/raw/atributos_491_C7_papel.xlsx                     # id_contentor | Si | ai | Vol_cont | Vol_kg | Ncont
+  matriz_ors:  data/matrices/matriz_distancias_491_C7_Runa_Sobral_Arruda_ORS.xlsx
+  instancia:   data/instancias/instancia_491_C7_papel.xlsx
+  resultados:  results/491_C7
+
+# ── Parametros do modelo (os que se editam com mais frequencia) ────
+modelo:
+  B: 16              # densidade dos residuos            [kg/m3]
+  Q: 3500            # capacidade do veiculo             [kg]
+  R: 0.1625          # receita por kg recolhido          [euro/kg]
+  C: 1.0             # custo de deslocamento             [euro/km]
+  OMEGA: 0.1         # custo fixo por veiculo            [euro]
+  MAX_ROTAS: 2       # numero maximo de rotas (k <= MAX_ROTAS)
+  MIP_GAP: 0.05      # tolerancia do solver              [0.05 = 5%]
+  TIME_LIMIT: 21600  # tempo maximo do solver            [s] (6 h)
+
+# ── Classificacao e horizonte ──────────────────────────────────────
+lookahead:
+  dias: 1                    # dias simulados
+  janela: 2                  # horizonte de antecipacao (dias)
+  threshold_mg: 100          # % : nivel + ai      >= thr -> MustGo
+  threshold_overflow: 100    # % : nivel + ai*k    >= ovf -> MustGoLA
+  nivel_bloqueio_pct: 5      # so diagnostico: pontos quase vazios
+
+# ── Solver / pre-processamento ─────────────────────────────────────
+solver:
+  knn: 25                        # vizinhos mais proximos por no (filtragem de arcos)
+  seed: null                     # null = semente por omissao do Gurobi
+  output_flag: 1                 # 1 = log do Gurobi no ecra
+  mip_focus: 1
+  heuristics: 0.5
+  threads: 0                     # 0 = todos os nucleos
+  cuts: 3
+  presolve: 1
+  node_method: 2                 # 2 = barrier nos nos do B&B
+  preservar_arcos_mustgo: false  # true = nunca filtrar arcos MustGo-MustGo
+  gerar_mapas: true
+
+# ── OpenRouteService (passo 1) ─────────────────────────────────────
+ors:
+  modo_transporte: driving-hgv   # driving-hgv | driving-car | cycling-regular | foot-walking
+  max_routes_per_request: 3500   # limite do servidor ORS
+  pausa_s: 1.6                   # pausa entre pedidos (<= 40 pedidos/min no plano free)
+  bloque_manual: null            # null = bloco calculado automaticamente
+  hoja_excel: 0
+  api_key_env: ORS_API_KEY       # nome da variavel de ambiente com a chave

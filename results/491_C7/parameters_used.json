@@ -1,0 +1,50 @@
+{
+  "label": "491_C7",
+  "description": "491 paper/cardboard bins, cluster C7 (Runa, Sobral de Monte Agraco, Arruda dos Vinhos)",
+  "root": "C:\\Users\\HectorFa\\vrpp-lookahead",
+  "paths": {
+    "coordinates": "data/raw/coordinates_491_C7_Runa_Sobral_Arruda.xlsx",
+    "attributes": "data/raw/attributes_491_C7_paper.xlsx",
+    "ors_matrix": "data/matrices/distance_matrix_491_C7_Runa_Sobral_Arruda_ORS.xlsx",
+    "instance": "data/instances/instance_491_C7_paper.xlsx",
+    "results": "results/491_C7"
+  },
+  "model": {
+    "B": 16,
+    "Q": 4000,
+    "R": 0.1625,
+    "C": 1.0,
+    "OMEGA": 0.1,
+    "MAX_ROUTES": 2,
+    "MIP_GAP": 0.05,
+    "TIME_LIMIT": 21600
+  },
+  "lookahead": {
+    "days": 1,
+    "window": 2,
+    "threshold_mg": 100,
+    "threshold_overflow": 100,
+    "near_empty_level_pct": 5
+  },
+  "solver": {
+    "knn": 25,
+    "seed": null,
+    "output_flag": 1,
+    "mip_focus": 1,
+    "heuristics": 0.5,
+    "threads": 0,
+    "cuts": 3,
+    "presolve": 1,
+    "node_method": 2,
+    "keep_mustgo_arcs": false,
+    "generate_maps": true
+  },
+  "ors": {
+    "transport_mode": "driving-hgv",
+    "max_routes_per_request": 3500,
+    "pause_s": 1.6,
+    "manual_block": null,
+    "excel_sheet": 0,
+    "api_key_env": "ORS_API_KEY"
+  }
+}

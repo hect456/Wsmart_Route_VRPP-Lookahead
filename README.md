@@ -610,7 +610,7 @@ vrpp-lookahead/
 │   ├── reporting.py     step 3c — Folium maps + 10-sheet Excel workbook
 │   └── simulation.py    step 3 — day loop
 ├── notebooks/VRPP_Lookahead.ipynb   ← thin shell over the package
-└── results/<label>/                 ← routes, KPI and maps (not versioned)
+└── results/<label>/                 ← routes, KPI and maps (git-ignored by default)
 ```
 
 Design rules that keep the project **stable and reusable**:
@@ -643,6 +643,20 @@ reproducible with steps 1 and 2. To version a specific one anyway:
 ```bash
 git add -f data/matrices/distance_matrix_491_C7_Runa_Sobral_Arruda_ORS.xlsx
 ```
+
+The same applies to `results/`. Runs stay ignored by default so that a routine
+`git add .` never publishes a half-finished or throwaway run; publish the ones
+worth keeping explicitly:
+
+```bash
+git add -f results/491_C7 results/full_run_491_C7.log
+```
+
+The repository currently ships two reference runs this way — `results/491_C7/`
+(5 % gap, solved to optimality in 37 min) and `results/491_C7_gap1/` (stopped by
+the 6 h limit at a 2.35 % gap) — together with their Gurobi logs, which record
+the solver version and the gap progression. Both are reproducible: `solver.seed`
+and `solver.threads` are pinned in the YAML to the values those runs used.
 
 > **Security:** the ORS key that used to be written inside
 > `calcular_matriz_ORS.py` is no longer in the code. Since it was once in plain

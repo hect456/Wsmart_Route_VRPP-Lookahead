@@ -18,33 +18,55 @@ from .instance import Instance
 from .vrpp import Solution
 
 COLORS = {'MustGo': '#d9534f', 'MustGoLA': '#f0ad4e', 'Optional': '#337ab7'}
-COLOR_NOT_COLLECTED = '#9e9e9e'
+COLOR_NOT_COLLECTED = '#5a5a5a'
+COLOR_NOT_COLLECTED_CRITICAL = '#b30000'
+CRITICAL_GROUPS = ('MustGo', 'MustGoLA')
 
 
-def _add_not_collected_layer(m, sol: Solution, inst: Instance) -> int:
-    """Grey dots for every bin no route collects.
+def _add_not_collected_layer(m, sol: Solution, inst: Instance) -> tuple:
+    """Bins no route collects, split by how much that matters.
 
-    Added before the route so the served stops always draw on top of them, and
-    kept small and semi-transparent: the point is to show the coverage the
-    solution leaves behind without competing with the route itself.
+    A skipped Optional bin is a deliberate economic choice, so it is drawn as a
+    plain dark-grey dot. A skipped MustGo or MustGoLA bin will overflow inside
+    the horizon, so it gets a larger outlined red dot — red here means *left
+    behind and about to overflow*, which is the failure the map should make
+    impossible to miss.
+
+    Both layers go in before the route, and the critical ones after the grey, so
+    that severity draws on top. Returns (grey, critical) counts.
     """
-    n = 0
+    plain, critical = [], []
     for i, bin_id in sol.id_map.items():
         if i == sol.dep or sol.g_val.get(i):
             continue
         pos = inst.latlon.get(bin_id)
         if not pos:
             continue
+        group = sol.kind_orig.get(i, 'Optional')
+        (critical if group in CRITICAL_GROUPS else plain).append((bin_id, pos, group, i))
+
+    for bin_id, pos, group, i in plain:
         folium.CircleMarker(
             [pos['Latitude'], pos['Longitude']],
-            radius=3.5, color=COLOR_NOT_COLLECTED, weight=1, opacity=0.75,
-            fill=True, fill_color=COLOR_NOT_COLLECTED, fill_opacity=0.55,
+            radius=5, color=COLOR_NOT_COLLECTED, weight=1, opacity=0.85,
+            fill=True, fill_color=COLOR_NOT_COLLECTED, fill_opacity=0.7,
             popup=(f'<b>NOT COLLECTED</b><br>ID: {bin_id}<br>'
-                   f'Type: {sol.kind_orig.get(i, "-")}<br>'
+                   f'Type: {group}<br>'
                    f'Level: {sol.S.get(i, 0.0):.2f} kg ({sol.pct.get(i, 0.0):.1f}%)'),
             tooltip=f'ID:{bin_id} | not collected').add_to(m)
-        n += 1
-    return n
+
+    for bin_id, pos, group, i in critical:
+        folium.CircleMarker(
+            [pos['Latitude'], pos['Longitude']],
+            radius=7, color='#000000', weight=2, opacity=1.0,
+            fill=True, fill_color=COLOR_NOT_COLLECTED_CRITICAL, fill_opacity=0.95,
+            popup=(f'<b>NOT COLLECTED — CRITICAL</b><br>ID: {bin_id}<br>'
+                   f'Type: {group}<br>'
+                   f'Level: {sol.S.get(i, 0.0):.2f} kg ({sol.pct.get(i, 0.0):.1f}%)<br>'
+                   f'<i>overflows within the lookahead horizon</i>'),
+            tooltip=f'ID:{bin_id} | {group} NOT collected').add_to(m)
+
+    return len(plain), len(critical)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -62,7 +84,7 @@ def plot_route(sol: Solution, nr: int, inst: Instance, folder: Path,
         return
 
     m = folium.Map(location=[pts[0]['lat'], pts[0]['lon']], zoom_start=13)
-    n_grey = _add_not_collected_layer(m, sol, inst) if show_not_collected else 0
+    n_grey, n_crit = _add_not_collected_layer(m, sol, inst) if show_not_collected else (0, 0)
     coords, visit = [], 0
     for p in pts:
         coords.append([p['lat'], p['lon']])
@@ -99,12 +121,15 @@ def plot_route(sol: Solution, nr: int, inst: Instance, folder: Path,
         '<span style="color:black">&#8962;</span> Depot'
         + (f'<br><span style="color:{COLOR_NOT_COLLECTED}">&#11044;</span> '
            f'Not collected ({n_grey})' if n_grey else '')
+        + (f'&nbsp;&nbsp;<span style="color:{COLOR_NOT_COLLECTED_CRITICAL}">&#11044;</span> '
+           f'<b>Not collected &mdash; overflows ({n_crit})</b>' if n_crit else '')
         + '</div>'))
 
     folder.mkdir(parents=True, exist_ok=True)
     m.save(str(folder / f'route_{nr}.html'))
     print(f'    Map route {nr}: {visit} stops'
-          + (f' | {n_grey} bins not collected shown in grey' if n_grey else ''))
+          + (f' | {n_grey} not collected (grey)' if n_grey else '')
+          + (f' | {n_crit} CRITICAL not collected (red)' if n_crit else ''))
 
 
 def plot_routes(sol: Solution, inst: Instance, folder: Path,

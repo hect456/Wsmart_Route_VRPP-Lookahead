@@ -439,7 +439,19 @@ it found so far, along with the optimality gap it managed to prove.
 For every simulated day, in `results/<label>/Day_XX/`:
 
 * `route_N.html` — open it in any browser: a map with the stop sequence
-  (red = MustGo, orange = MustGoLA, blue = Optional, house = depot).
+  (red = MustGo, orange = MustGoLA, blue = Optional, house = depot). Bins the
+  solution leaves behind are drawn as small **grey dots**, so the coverage the
+  route achieves is visible against what it skips; click one to see its id, level
+  and classification. Turn the layer off with `05_rebuild_maps.py --no-grey`.
+
+  To redraw the maps of a run that is already solved — after changing the
+  rendering, say — use `05_rebuild_maps.py` instead of re-running the optimiser:
+  it reads the routes back from the result workbook, so the maps come from the
+  exact same solution and no solve time is spent.
+
+  ```bash
+  python scripts/05_rebuild_maps.py --config config/instance_491_C7.yaml
+  ```
 * `result_Day_XX.xlsx` — 10 sheets:
 
 | Sheet | Content |
@@ -600,7 +612,9 @@ vrpp-lookahead/
 ├── scripts/
 │   ├── 01_build_ors_matrix.py
 │   ├── 02_build_instance.py
-│   └── 03_run_vrpp.py
+│   ├── 03_run_vrpp.py
+│   ├── 04_compare_evox.py       ← compare an external solution against the VRPP
+│   └── 05_rebuild_maps.py       ← redraw the maps of a solved run, without re-solving
 ├── src/vrpp_lookahead/
 │   ├── config.py        parameters (dataclasses + YAML + CLI overrides)
 │   ├── ors_matrix.py    step 1 — OpenRouteService Matrix API

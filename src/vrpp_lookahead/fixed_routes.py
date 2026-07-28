@@ -14,11 +14,12 @@ part of the supplied id list.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
 
 from .config import Config
-from .instance import Instance
+from .instance import Instance, _resolve_sheet
 from .lookahead import lookahead
 
 # Row order of the comparison report, and the key each row reads.
@@ -135,6 +136,63 @@ def evaluate_fixed_routes(routes: dict, inst: Instance, cfg: Config,
 
 
 ROUTE_KPI_SHEETS = ('3_KPI_Routes', '3_KPI_Rotas')
+ALL_BINS_SHEETS = ('8_All_Bins', '8_Todos_Contentores')
+LOOKAHEAD_SHEETS = ('1_Lookahead',)
+
+
+def solution_from_workbook(path, inst: Instance):
+    """Rebuild a plottable `Solution` from a result workbook, without re-solving.
+
+    Only the fields the map renderer reads are populated — routes, node mapping,
+    levels and the per-bin classification. Everything else is left empty, so the
+    object is good for `reporting.plot_routes` and nothing else.
+
+    Levels and groups are read from the workbook rather than recomputed, so a
+    map can be rebuilt for any simulated day, not just day 1.
+    """
+    from .vrpp import Solution
+
+    available = pd.ExcelFile(path).sheet_names
+    routes = routes_from_solution_workbook(path)
+
+    df_all = pd.read_excel(path, sheet_name=_resolve_sheet(available, ALL_BINS_SHEETS, str(path)))
+    col_kg = 'Level_kg' if 'Level_kg' in df_all.columns else 'Nivel_kg'
+    col_pct = 'Level_pct' if 'Level_pct' in df_all.columns else 'Nivel_pct'
+    col_got = 'Collected' if 'Collected' in df_all.columns else 'Recolhido'
+    df_all = df_all.set_index('id_contentor')
+
+    df_la = pd.read_excel(path, sheet_name=_resolve_sheet(available, LOOKAHEAD_SHEETS, str(path)))
+    col_grp = 'Group' if 'Group' in df_la.columns else 'Grupo'
+    groups = df_la.set_index('id_contentor')[col_grp].to_dict()
+    label = {'MustGo': 'MustGo', 'MustGoLA': 'MustGoLA'}
+
+    ids = list(inst.ids)                       # ids[0] == 0 == depot
+    id_map = {i: b for i, b in enumerate(ids)}
+    pos = {b: i for i, b in id_map.items()}
+
+    collected = {b for seq in routes.values() for b in seq}
+    S, pct, g_val, kind_orig = {0: 0.0}, {0: 0.0}, {}, {}
+    for i, b in id_map.items():
+        if i == 0:
+            continue
+        S[i] = float(df_all[col_kg].get(b, 0.0))
+        pct[i] = float(df_all[col_pct].get(b, 0.0))
+        g_val[i] = 1 if b in collected else 0
+        kind_orig[i] = label.get(groups.get(b), 'Optional')
+
+    arc_routes = []
+    for nr in sorted(routes):
+        seq = [pos[b] for b in routes[nr]]
+        arc_routes.append(list(zip([0] + seq, seq + [0])))
+
+    empty = pd.DataFrame()
+    return Solution(
+        day=Path(path).stem.replace('result_', ''), routes=arc_routes, id_map=id_map,
+        S=S, pct=pct, kind=dict(kind_orig), kind_orig=kind_orig, forced={},
+        g_val=g_val, bin_route={}, collected=sorted(collected), kpi={}, diag={},
+        df_not_visited=empty, df_lookahead=empty,
+        D=inst.dist, TM=inst.tmin, dep=0,
+    )
 
 
 def routes_from_solution_workbook(path, sheet: str | None = None) -> dict:

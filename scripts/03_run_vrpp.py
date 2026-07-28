@@ -11,10 +11,13 @@ import json
 
 from _common import add_model_arguments, base_parser, overrides
 
-from vrpp_lookahead import Config, diagnose, instance_summary, load_instance, run
+from vrpp_lookahead import (Config, diagnose, instance_summary, load_instance, run,
+                            runtime_environment)
 
 
 def main() -> None:
+    # captured before the solve so the timestamp marks the start, not the end
+    environment = runtime_environment()
     p = add_model_arguments(base_parser(__doc__))
     p.add_argument('--diagnose-only', action='store_true',
                    help='only classify MustGo/MustGoLA and check the fleet')
@@ -35,9 +38,14 @@ def main() -> None:
     kpis = run(cfg)
 
     folder = cfg.path('results', create_dir=True)
+    record = {'parameters': cfg.as_dict(),
+              'environment': {**runtime_environment(cfg),
+                              'run_started_utc': environment['run_started_utc']}}
     (folder / 'parameters_used.json').write_text(
-        json.dumps(cfg.as_dict(), indent=2, ensure_ascii=False, default=str), encoding='utf-8')
+        json.dumps(record, indent=2, ensure_ascii=False, default=str), encoding='utf-8')
     print(f'Parameters used: {folder / "parameters_used.json"}')
+    for caveat in record['environment']['reproducibility']:
+        print(f'  Reproducibility: {caveat}')
     print(f'Days with a solution: {len(kpis)}/{cfg.lookahead.days}')
 
 

@@ -32,11 +32,12 @@ lookahead:
 
 solver:
   knn: 25
-  seed: null
+  # Pinned for reproducibility — the values the 6 h run actually used.
+  seed: 0
   output_flag: 1
   mip_focus: 1
   heuristics: 0.5
-  threads: 0
+  threads: 8
   cuts: 3
   presolve: 1
   node_method: 2

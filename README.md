@@ -457,8 +457,12 @@ For every simulated day, in `results/<label>/Day_XX/`:
 And at the root of `results/<label>/`:
 
 * `summary_<label>_all_days.xlsx` — KPI per day, consolidated KPI and diagnostics.
-* `parameters_used.json` — the exact configuration that produced these results,
-  so every result stays traceable.
+* `parameters_used.json` — two blocks: `parameters`, the exact configuration that
+  produced these results, and `environment`, the solver and interpreter versions,
+  the resolved thread count and the seed. A MILP stopped at a non-zero gap is
+  reproducible only for the same solver version, seed and thread count, so the
+  parameters alone would not pin the result down. The file also lists any
+  reproducibility caveat it detects, such as an unset seed.
 
 ---
 
@@ -498,6 +502,13 @@ Other blocks:
 The `ors` flags (`--mode`, `--route-limit`) belong to `01_build_ors_matrix.py`;
 all the others belong to `03_run_vrpp.py`. A `—` means the parameter is only
 settable in the YAML. Run any script with `--help` to see its own options.
+
+> **Reproducibility.** For a result you intend to publish, set `solver.seed` to a
+> fixed integer and `solver.threads` to a fixed count. With `seed: null` and
+> `threads: 0` the solver explores on a machine-dependent path, so two runs of the
+> same instance can return *different* solutions of equal quality — both valid
+> within the MIP gap, but not identical. Every run records what it actually used
+> in `parameters_used.json` and warns on screen when these are left open.
 
 ---
 

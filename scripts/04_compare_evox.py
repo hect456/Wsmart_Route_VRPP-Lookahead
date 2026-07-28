@@ -106,7 +106,21 @@ def build_table(metrics_fix, metrics_opt, reported: dict) -> pd.DataFrame:
     return df[ordered].fillna(BLANK)
 
 
-def build_notes(metrics_fix, metrics_opt, reported: dict, cfg: Config) -> pd.DataFrame:
+def solution_provenance(path) -> dict:
+    """Which optimisation run the 'VRPP optimal' block was read from."""
+    try:
+        kpi = pd.read_excel(path, sheet_name='2_KPI_General').set_index('KPI')['Value']
+        return {'file': str(path), 'gap_pct': float(kpi['MIP Gap']),
+                'solver_time_h': float(kpi['Solver time'].iloc[-1]
+                                       if hasattr(kpi['Solver time'], 'iloc')
+                                       else kpi['Solver time']),
+                'status': int(float(kpi['Status (2=Optimal,9=TimeLimit)']))}
+    except Exception:
+        return {'file': str(path)}
+
+
+def build_notes(metrics_fix, metrics_opt, reported: dict, cfg: Config,
+                provenance: dict | None = None) -> pd.DataFrame:
     """Caveats a reader needs to interpret the table, derived from the data itself.
 
     Keeps the workbook self-contained: why blocks differ, which gaps come from a
@@ -165,6 +179,22 @@ def build_notes(metrics_fix, metrics_opt, reported: dict, cfg: Config) -> pd.Dat
                        'empty permanently and no difference can be computed for them: '
                        + ', '.join(missing) + '. The values under "VRPP fixing EVOX" are this '
                        'project\'s classification applied to the external routes.'),
+        })
+
+    if provenance:
+        status = {2: 'OPTIMAL', 9: 'TIME_LIMIT'}.get(provenance.get('status'), '')
+        gap = provenance.get('gap_pct')
+        notes.append({
+            'Topic': 'Optimal block provenance',
+            'Detail': (f'Read from {provenance["file"]}'
+                       + (f', which stopped at a proven MIP gap of {gap:.2f} %'
+                          if gap is not None else '')
+                       + (f' with status {status}' if status else '')
+                       + (f' after {provenance["solver_time_h"]:.2f} h'
+                          if provenance.get('solver_time_h') is not None else '')
+                       + '. A non-zero gap means the true optimum is at most that much better '
+                         'than this solution, so every "optimal" figure below is a lower bound '
+                         'on the achievable improvement over the external routes.'),
         })
 
     notes.append({
@@ -317,7 +347,8 @@ def main() -> None:
     table = build_table(metrics_fix, metrics_opt, reported)
     print(table.to_string(index=False))
 
-    notes = build_notes(metrics_fix, metrics_opt, reported, cfg)
+    notes = build_notes(metrics_fix, metrics_opt, reported, cfg,
+                        solution_provenance(solution))
     print('\n--- Notes ---')
     for _, n in notes.iterrows():
         print(f'  * {n["Topic"]}: {n["Detail"]}')

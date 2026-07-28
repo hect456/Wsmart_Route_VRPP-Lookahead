@@ -7,7 +7,7 @@ Pipeline:
 
 Every parameter lives in `config.Config` (YAML file under config/).
 """
-from .config import Config, Lookahead, Model, ORS, Paths, Solver
+from .config import Config, Lookahead, Model, ORS, Paths, Solver, runtime_environment
 from .instance import Instance, build_instance, diagnose, instance_summary, load_instance
 from .lookahead import LookaheadResult, lookahead
 from .ors_matrix import build_ors_matrix
@@ -18,7 +18,7 @@ from .vrpp import Solution, solve_vrpp
 __version__ = '1.0.0'
 
 __all__ = [
-    'Config', 'Model', 'Lookahead', 'Solver', 'ORS', 'Paths',
+    'Config', 'Model', 'Lookahead', 'Solver', 'ORS', 'Paths', 'runtime_environment',
     'Instance', 'build_instance', 'load_instance', 'instance_summary', 'diagnose',
     'lookahead', 'LookaheadResult',
     'solve_vrpp', 'Solution',

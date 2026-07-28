@@ -8,7 +8,10 @@ edited in the YAML file under `config/` or on the command line:
 from __future__ import annotations
 
 import os
+import platform
+import sys
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +19,55 @@ import yaml
 
 # Model parameters the user may edit (YAML or CLI).
 MODEL_PARAMETERS = ('B', 'Q', 'R', 'C', 'OMEGA', 'MIP_GAP', 'TIME_LIMIT', 'MAX_ROUTES')
+
+
+def runtime_environment(cfg: 'Config | None' = None) -> dict:
+    """Solver and interpreter versions of the current run.
+
+    Recorded next to the parameters because a MILP stopped at a non-zero gap is
+    reproducible only for the same solver version, seed and thread count: within
+    the gap, several solutions are equally acceptable and which one is returned
+    depends on the search path. The parameters alone do not pin the result down.
+    """
+    def _version(module: str) -> str:
+        try:
+            return __import__(module).__version__
+        except Exception:
+            return 'not installed'
+
+    try:
+        import gurobipy
+        gurobi = '.'.join(str(p) for p in gurobipy.gurobi.version())
+    except Exception:
+        gurobi = 'not installed'
+
+    cores = os.cpu_count()
+    threads_cfg = cfg.solver.threads if cfg else None
+    seed_cfg = cfg.solver.seed if cfg else None
+
+    env = {
+        'run_started_utc': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        'gurobi_version': gurobi,
+        'python_version': sys.version.split()[0],
+        'platform': f'{platform.system()} {platform.release()}',
+        'cpu_count': cores,
+        'threads_configured': threads_cfg,
+        'threads_effective': cores if threads_cfg in (0, None) else threads_cfg,
+        'seed_configured': seed_cfg,
+        'pandas_version': _version('pandas'),
+        'numpy_version': _version('numpy'),
+        'package_version': __import__('vrpp_lookahead').__version__,
+    }
+
+    caveats = []
+    if seed_cfg is None:
+        caveats.append('solver.seed is null — set it to pin the search path.')
+    if threads_cfg in (0, None):
+        caveats.append(f'solver.threads is 0 — resolved to {cores} on this machine; '
+                       f'a machine with a different core count may return a different '
+                       f'solution of equal quality.')
+    env['reproducibility'] = caveats or ['seed and thread count are pinned.']
+    return env
 
 
 @dataclass

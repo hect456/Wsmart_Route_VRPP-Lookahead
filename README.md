@@ -39,8 +39,8 @@ If you only want to see the project work with the bundled example data:
 
 ```bash
 # 1. Download the project and enter its folder
-git clone <repo-url>
-cd vrpp-lookahead
+git clone https://github.com/hect456/Wsmart_Route_VRPP-Lookahead.git
+cd Wsmart_Route_VRPP-Lookahead
 
 # 2. Create an isolated Python environment and install the dependencies
 python -m venv .venv
@@ -48,16 +48,22 @@ python -m venv .venv
 # source .venv/bin/activate            # Linux / macOS
 pip install -r requirements.txt
 
-# 3. Check the data without running the optimiser (no Gurobi licence needed)
+# 3. Build the instance workbook from the bundled data (a few seconds)
+python scripts/02_build_instance.py
+
+# 4. Check the data without running the optimiser (no Gurobi licence needed)
 python scripts/03_run_vrpp.py --diagnose-only
 
-# 4. Run the full optimisation (needs a Gurobi licence)
+# 5. Run the full optimisation (needs a Gurobi licence)
 python scripts/03_run_vrpp.py
 ```
 
-Results land in `results/491_C7/`. Steps 1 and 2 of the pipeline can be skipped
-for this example because the distance matrix and the instance file are already on
-disk.
+Results land in `results/491_C7/`.
+
+**Step 1 is not needed for this example.** The repository ships the ORS distance
+matrix in `data/matrices/`, so no OpenRouteService key is required to try the
+project out. Step 2 *is* needed on a fresh clone: the instance workbook it
+produces is git-ignored, because it is rebuilt from the matrix in seconds.
 
 To use **your own data**, read sections 4 → 7.
 
@@ -657,6 +663,12 @@ reproducible with steps 1 and 2. To version a specific one anyway:
 ```bash
 git add -f data/matrices/distance_matrix_491_C7_Runa_Sobral_Arruda_ORS.xlsx
 ```
+
+That exact file **is** shipped, on purpose: without it a fresh clone could not run
+anything without first registering an OpenRouteService key and spending an API
+quota, which would defeat the point of a bundled reference instance. It costs
+12 MB and never goes stale, since the matrix depends only on the coordinates.
+The instance workbook is *not* shipped — step 2 rebuilds it in seconds.
 
 The same applies to `results/`. Runs stay ignored by default so that a routine
 `git add .` never publishes a half-finished or throwaway run; publish the ones

@@ -34,6 +34,13 @@ REPORT_ROWS = (
     ('Profit per route (euro)', 'profit_euro'),
     ('Ratio per route (km/Ton)', 'km_per_ton'),
     ('Capacity used (%)', 'cap_used_pct'),
+    ('Driving at shift speed (min)', 'shift_driving_min'),
+    ('Service time, bins x rate (min)', 'shift_service_min'),
+    ('WORKING DAY per route (h)', 'shift_total_h'),
+)
+TOTAL_ROWS_SHIFT = (
+    ('Longest working day (h)', 'max_shift_total_h'),
+    ('Routes over the shift limits', 'n_routes_over_shift'),
 )
 TOTAL_ROWS = (
     ('Total bins not visited (no coverage)', 'n_not_visited'),
@@ -73,7 +80,7 @@ def evaluate_fixed_routes(routes: dict, inst: Instance, cfg: Config,
     `routes` maps a route number to the ordered list of bin ids it serves,
     e.g. {1: [266, 268, ...], 2: [521, ...]}. The depot is implicit.
     """
-    mod = cfg.model
+    mod, sh = cfg.model, cfg.shift
     state = inst.initial_state()
     la = lookahead(state, inst, cfg, verbose=False)
     mustgo, mustgo_la = set(la.mustgo), set(la.mustgo_la)
@@ -94,7 +101,13 @@ def evaluate_fixed_routes(routes: dict, inst: Instance, cfg: Config,
         km, mins = _route_distance(inst, seq) if seq else (0.0, 0.0)
         profit = mod.R * weight - mod.C * km - mod.OMEGA
 
-        rows.append({
+        # Working day: driving at the shift's average speed (NOT the ORS free-flow
+        # time, which no collection round achieves) plus one service stop per bin.
+        drive = sh.travel_min(km)
+        service = len(seq) * sh.service_time_min
+        total_min = drive + service
+
+        row = {
             'route': nr,
             'n_bins': len(seq),
             'n_mustgo': sum(1 for b in seq if b in mustgo),
@@ -107,7 +120,14 @@ def evaluate_fixed_routes(routes: dict, inst: Instance, cfg: Config,
             'km_per_ton': round(km / (weight / 1000.0), 4) if weight > 0 else 0.0,
             'cap_used_pct': round(weight / mod.Q * 100.0, 2),
             'exceeds_Q': 'YES !!!' if weight > mod.Q + 1e-3 else 'no',
-        })
+            'shift_driving_min': round(drive, 2),
+            'shift_service_min': round(service, 2),
+            'shift_total_min': round(total_min, 2),
+            'shift_total_h': round(total_min / 60.0, 3),
+        }
+        for h in sh.report_h:
+            row[f'fits_{h:g}h'] = 'no  EXCEEDS' if total_min > h * 60.0 + 1e-6 else 'yes'
+        rows.append(row)
 
     duplicated = len(seen) - len(set(seen))
     assert duplicated == 0, f'{duplicated} bins appear in more than one route'
@@ -129,6 +149,12 @@ def evaluate_fixed_routes(routes: dict, inst: Instance, cfg: Config,
         'total_travel_time_min': round(float(per_route['travel_time_min'].sum()), 2) if rows else 0.0,
         'total_profit_euro': round(float(per_route['profit_euro'].sum()), 4),
         'total_km_per_ton': round(total_km / (total_kg / 1000.0), 4) if total_kg > 0 else 0.0,
+        # The shift is a per-crew limit, so the binding figure is the LONGEST route,
+        # never the sum: two 5 h routes run in parallel, they do not make a 10 h day.
+        'max_shift_total_h': round(float(per_route['shift_total_h'].max()), 3) if rows else 0.0,
+        'n_routes_over_shift': int(sum(
+            1 for _, r in per_route.iterrows()
+            if r['shift_total_min'] > min(sh.report_h) * 60.0 + 1e-6)) if rows else 0,
     }
 
     return RouteMetrics(per_route=per_route, totals=totals,

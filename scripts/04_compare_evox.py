@@ -25,7 +25,8 @@ import yaml
 from _common import base_parser
 
 from vrpp_lookahead import Config, load_instance
-from vrpp_lookahead.fixed_routes import (REPORT_ROWS, TOTAL_ROWS, evaluate_fixed_routes,
+from vrpp_lookahead.fixed_routes import (REPORT_ROWS, TOTAL_ROWS, TOTAL_ROWS_SHIFT,
+                                         evaluate_fixed_routes,
                                          routes_from_solution_workbook)
 
 BLANK = ''
@@ -62,7 +63,7 @@ def build_table(metrics_fix, metrics_opt, reported: dict) -> pd.DataFrame:
             row[f'VRPP_opt R{r}'] = opt.loc[r, key]
         rows.append(row)
 
-    for title, key in TOTAL_ROWS:
+    for title, key in TOTAL_ROWS + TOTAL_ROWS_SHIFT:
         row = {'Metric': title}
         for r in routes_fix:
             row[f'EVOX_rep R{r}'] = BLANK
@@ -79,8 +80,11 @@ def build_table(metrics_fix, metrics_opt, reported: dict) -> pd.DataFrame:
     df = pd.DataFrame(rows)
 
     # per-route metrics also get a TOTAL / Opt-Fix column where summing makes sense
+    # `shift_total_h` is deliberately NOT summable: a shift is a per-crew limit, so
+    # the meaningful aggregate is the longest route (see TOTAL_ROWS_SHIFT), not the sum.
     summable = {'n_bins', 'n_mustgo', 'n_mustgo_la', 'n_optional', 'weight_kg',
-                'distance_km', 'travel_time_min', 'profit_euro'}
+                'distance_km', 'travel_time_min', 'profit_euro',
+                'shift_driving_min', 'shift_service_min'}
     for i, (title, key) in enumerate(REPORT_ROWS):
         if key in summable:
             f = float(fix[key].sum())
@@ -272,6 +276,21 @@ def build_interpretation(metrics_fix, metrics_opt, reported: dict, cfg: Config,
         f'({" and ".join(f"{d:.2f} km" for d in metrics_opt.per_route["distance_km"])}), because '
         f'it maximises joint profit rather than symmetry. If an even workload across drivers is a '
         f'real operational requirement, it has to be added to the model — it is not there today.'))
+
+    sh = cfg.shift
+    limits = ' / '.join(f'{h:g} h' for h in sh.report_h)
+    items.append((
+        'Working day',
+        f'At {sh.speed_kmh:g} km/h with {sh.service_time_min:g} min per bin, the optimal routes '
+        f'take {" and ".join(f"{h:.2f} h" for h in metrics_opt.per_route["shift_total_h"])} '
+        f'against {" and ".join(f"{h:.2f} h" for h in fix_route["shift_total_h"])} for the '
+        f'external ones, measured against limits of {limits}. This reverses the reading of every '
+        f'row above: the optimal solution wins on distance, weight and profit because visiting a '
+        f'bin costs it nothing in the objective, which prices distance and never time. The '
+        f'{int(metrics_opt.per_route["n_bins"].sum() - fix_route["n_bins"].sum())} extra stops add '
+        f'{float(metrics_opt.per_route["shift_service_min"].sum() - fix_route["shift_service_min"].sum()):.0f} '
+        f'min of service time that the model does not see. Set shift.enforce = true to make the '
+        f'limit binding and re-solve; the profit advantage will shrink to whatever fits in a shift.'))
 
     items.append((
         'Caveat',

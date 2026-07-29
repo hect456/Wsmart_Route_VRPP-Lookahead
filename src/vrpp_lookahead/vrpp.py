@@ -128,20 +128,57 @@ def _adjust_mustgo(NR, S, crit, route_ids, inst: Instance, cfg: Config):
 
 
 def _warm_start(NR, dep, S, D, cfg: Config, mandatory, arcs_s):
-    """Nearest neighbour over the mandatory points, limited to MAX_ROUTES."""
+    """Nearest neighbour towards the mandatory points, limited to MAX_ROUTES.
+
+    Hopping straight from one MustGo to the next does not work here: KNN keeps
+    each node's 25 nearest neighbours, and those are mostly *not* MustGo, so a
+    greedy restricted to mandatory nodes runs out of arcs after a handful of
+    them and hands Gurobi a start covering a quarter of what it must cover.
+
+    So optional nodes are allowed as stepping stones — they are chosen for how
+    much closer they bring the route to the nearest pending MustGo, not for
+    being cheap to reach, which is what stops the walk from drifting. The result
+    is a feasible, mediocre solution: exactly what a MIP start is for.
+
+    When `shift.enforce` is on the walk respects the shift too, return leg
+    included — a start that violates the constraint just added is rejected, and
+    on a model this size the solver may then find no incumbent at all.
+    """
+    mod, sh = cfg.model, cfg.shift
     pending = set(mandatory)
+    unvisited = set(NR)
     routes = []
-    while pending and len(routes) < cfg.model.MAX_ROUTES:
-        route, cur, load = [], dep, 0.0
+
+    def reachable(cur, j, load, elapsed) -> bool:
+        if (cur, j) not in arcs_s or load + S[j] > mod.Q:
+            return False
+        if sh.enforce:
+            # reach j, serve it, and still make it home inside the shift
+            return elapsed + sh.route_min(D[cur][j] + D[j][dep], 1) <= sh.max_shift_min
+        return True
+
+    while len(routes) < mod.MAX_ROUTES and (pending & unvisited):
+        route, cur, load, elapsed = [], dep, 0.0, 0.0
         while True:
-            best, best_d = None, float('inf')
-            for j in pending:
-                if load + S[j] <= cfg.model.Q and D[cur][j] < best_d and (cur, j) in arcs_s:
-                    best, best_d = j, D[cur][j]
-            if best is None:
-                break
+            todo = pending & unvisited
+            options = [j for j in todo if reachable(cur, j, load, elapsed)]
+            if options:
+                best = min(options, key=lambda j: D[cur][j])
+            else:
+                # no MustGo within reach — step to whichever node shortens the
+                # way to the closest one still pending
+                if not todo:
+                    break
+                target = min(todo, key=lambda j: D[cur][j])
+                bridges = [j for j in unvisited
+                           if j != target and reachable(cur, j, load, elapsed)]
+                if not bridges:
+                    break
+                best = min(bridges, key=lambda j: D[cur][j] + D[j][target])
             route.append((cur, best))
             load += S[best]
+            elapsed += sh.route_min(D[cur][best], 1)
+            unvisited.discard(best)
             pending.discard(best)
             cur = best
         if not route:
@@ -182,7 +219,7 @@ def _extract_routes(active, dep):
 # ══════════════════════════════════════════════════════════════════
 def solve_vrpp(state: pd.DataFrame, la: LookaheadResult, inst: Instance,
                cfg: Config, day_label: str) -> Solution | None:
-    mod, sv = cfg.model, cfg.solver
+    mod, sv, sh = cfg.model, cfg.solver, cfg.shift
     mg_ini_s, mg_la_s = set(la.mustgo), set(la.mustgo_la)
     mg_all = mg_ini_s | mg_la_s
 
@@ -260,6 +297,30 @@ def solve_vrpp(state: pd.DataFrame, la: LookaheadResult, inst: Instance,
         mdl.addConstr(quicksum(x[i, j] for i in N if (i, j) in arcs_s) == g[j])
         mdl.addConstr(quicksum(x[j, t] for t in N if (j, t) in arcs_s) == g[j])
 
+    # ── shift length (optional hard constraint) ────────────────────
+    # Same single-commodity flow trick as the load: `t[i,j]` carries the elapsed
+    # minutes from the depot departure up to the arrival at j through arc (i,j).
+    # At each visited node the crew spends `service_time_min`, and each arc costs
+    # its distance at the shift's average speed. Bounding `t[j,dep]` therefore
+    # bounds the whole route, return leg included.
+    if sh.enforce:
+        T = sh.max_shift_min
+        tau = {(i, j): sh.travel_min(D[i][j]) for i, j in arcs}
+        t = mdl.addVars(arcs, vtype=GRB.CONTINUOUS, lb=0, name='t')
+        for i, j in arcs:
+            mdl.addConstr(t[i, j] <= T * x[i, j])
+        for j in NR:
+            if (dep, j) in arcs_s:
+                mdl.addConstr(t[dep, j] == tau[dep, j] * x[dep, j])
+        for i in NR:
+            mdl.addConstr(
+                quicksum(t[i, j] for j in N if (i, j) in arcs_s)
+                - quicksum(t[j, i] for j in N if (j, i) in arcs_s)
+                == sh.service_time_min * g[i]
+                + quicksum(tau[i, j] * x[i, j] for j in N if (i, j) in arcs_s))
+        print(f'  *** ACTIVE CONSTRAINT: shift <= {sh.max_shift_h:g} h per route '
+              f'({sh.speed_kmh:g} km/h, {sh.service_time_min:g} min/bin) ***')
+
     mdl.addConstr(quicksum(f[dep, j] for j in NR if (dep, j) in arcs_s)
                   == quicksum(g[j] for j in NR))          # subtour elimination
     for j in NR:
@@ -312,6 +373,21 @@ def solve_vrpp(state: pd.DataFrame, la: LookaheadResult, inst: Instance,
         warning = '  *** EXCEEDS Q ***' if kg_r > mod.Q + 1e-3 else ''
         print(f'    Route {nr}: {kg_r:.1f} kg  ({kg_r/mod.Q*100:.1f}%){warning}')
 
+    # Working day per route. Reported whether or not it is enforced — a route the
+    # crew cannot finish is worth knowing about even when the model did not forbid it.
+    print(f'\n  Per-route working day ({sh.speed_kmh:g} km/h, '
+          f'{sh.service_time_min:g} min/bin{"" if sh.enforce else ", NOT enforced"}):')
+    shift_h = []
+    for nr, rt in enumerate(routes, 1):
+        km_r = sum(D[i][j] for (i, j) in rt)
+        n_r = sum(1 for (_, j) in rt if j != dep)
+        min_r = sh.route_min(km_r, n_r)
+        shift_h.append(min_r / 60.0)
+        over = [f'{h:g}h' for h in sh.report_h if min_r > h * 60.0 + 1e-6]
+        print(f'    Route {nr}: {sh.travel_min(km_r):6.1f} min driving + '
+              f'{n_r * sh.service_time_min:6.1f} min service = {min_r:6.1f} min '
+              f'({min_r/60:.2f} h)' + (f'  *** EXCEEDS {", ".join(over)} ***' if over else '  OK'))
+
     dist_km = sum(D[i][j] * x[i, j].X for i, j in arcs)
     tmin_tot = sum(TM[i][j] * x[i, j].X for i, j in arcs)
     waste_tot = sum(S[i] for i in NR if g_val[i])
@@ -355,6 +431,10 @@ def solve_vrpp(state: pd.DataFrame, la: LookaheadResult, inst: Instance,
         'km_per_kg': round(dist_km / waste_tot, 6) if waste_tot > 0 else 0.0,
         'Travel_Time_min': round(tmin_tot, 2),
         'Capacity_Used_pct': round(cap_pct, 2),
+        # A shift binds one crew, so the aggregate that matters is the longest route.
+        'Max_Shift_h': round(max(shift_h), 3) if shift_h else 0.0,
+        'Shift_Enforced_h': sh.max_shift_h if sh.enforce else None,
+        'N_Routes_Over_Shift': sum(1 for h in shift_h if h > min(sh.report_h) + 1e-9),
         'Revenue_euro': round(mod.R * waste_tot, 4),
         'Distance_Cost_euro': round(mod.C * dist_km, 4),
         'Vehicle_Cost_euro': round(mod.OMEGA * kv, 4),

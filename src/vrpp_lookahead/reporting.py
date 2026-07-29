@@ -143,7 +143,7 @@ def plot_routes(sol: Solution, inst: Instance, folder: Path,
 # Excel
 # ══════════════════════════════════════════════════════════════════
 def kpi_per_route(sol: Solution, cfg: Config) -> pd.DataFrame:
-    Q = cfg.model.Q
+    Q, sh = cfg.model.Q, cfg.shift
     rows = []
     for nr, rt in enumerate(sol.routes, 1):
         d_km = t_min = weight = 0.0
@@ -159,14 +159,21 @@ def kpi_per_route(sol: Solution, cfg: Config) -> pd.DataFrame:
                 n_mg += sol.kind[j] == 'MustGo'
                 n_la += sol.kind[j] == 'MustGoLA'
                 n_op += sol.kind[j] == 'Optional'
-        rows.append({
+        shift_min = sh.route_min(d_km, n_b)
+        row = {
             'Route': nr, 'N_Bins': n_b, 'N_MustGo': n_mg, 'N_MustGoLA': n_la,
             'N_Optional': n_op, 'Total_Waste_kg': round(weight, 2),
             'Distance_km': round(d_km, 4), 'Distance_m': round(d_km * 1000, 1),
             'Travel_Time_min': round(t_min, 2), 'Cap_Used_pct': round(weight / Q * 100, 2),
             'Exceeds_Q': 'YES !!!' if weight > Q + 1e-3 else 'no',
-            'Sequence': ('0 > ' + ' > '.join(map(str, seq)) + ' > 0') if seq else '0 > 0',
-        })
+            'Shift_Driving_min': round(sh.travel_min(d_km), 2),
+            'Shift_Service_min': round(n_b * sh.service_time_min, 2),
+            'Shift_Total_h': round(shift_min / 60.0, 3),
+        }
+        for h in sh.report_h:
+            row[f'Fits_{h:g}h'] = 'no  EXCEEDS' if shift_min > h * 60.0 + 1e-6 else 'yes'
+        row['Sequence'] = ('0 > ' + ' > '.join(map(str, seq)) + ' > 0') if seq else '0 > 0'
+        rows.append(row)
     return pd.DataFrame(rows)
 
 
@@ -220,6 +227,16 @@ def export_excel(sol: Solution, inst: Instance, cfg: Config, folder: Path) -> Pa
             {'KPI': 'Total distance', 'Value': kpi['Total_Distance_m'], 'Unit': 'm'},
             {'KPI': 'km per kg', 'Value': kpi['km_per_kg'], 'Unit': 'km/kg'},
             {'KPI': 'Total travel time', 'Value': kpi['Travel_Time_min'], 'Unit': 'min'},
+            {'KPI': '', 'Value': '', 'Unit': ''},
+            {'KPI': 'WORKING DAY', 'Value': '', 'Unit': ''},
+            {'KPI': 'Average speed assumed', 'Value': cfg.shift.speed_kmh, 'Unit': 'km/h'},
+            {'KPI': 'Service time per bin', 'Value': cfg.shift.service_time_min, 'Unit': 'min'},
+            {'KPI': 'Longest route (per crew)', 'Value': kpi['Max_Shift_h'], 'Unit': 'h'},
+            {'KPI': 'Shift limit enforced in the model',
+             'Value': kpi['Shift_Enforced_h'] if kpi['Shift_Enforced_h'] else 'no',
+             'Unit': 'h' if kpi['Shift_Enforced_h'] else ''},
+            {'KPI': f'Routes over {min(cfg.shift.report_h):g} h',
+             'Value': kpi['N_Routes_Over_Shift'], 'Unit': ''},
             {'KPI': '', 'Value': '', 'Unit': ''},
             {'KPI': 'SOLVER', 'Value': '', 'Unit': ''},
             {'KPI': 'MIP Gap', 'Value': kpi['MIP_Gap_pct'], 'Unit': '%'},

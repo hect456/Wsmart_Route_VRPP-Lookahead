@@ -1,0 +1,71 @@
+# ══════════════════════════════════════════════════════════════════
+# Instance 491_C7 — same data and same solver settings as
+# instance_491_C7.yaml, with the working day imposed as a hard
+# constraint (8 h per crew).
+#
+# Every parameter that could move the result is pinned to the values of
+# the published 5 % run in results/491_C7/: MIP_GAP, TIME_LIMIT, seed,
+# threads, KNN. That run, not the 1 % one, is this run's baseline.
+#
+# CAVEAT — this is not yet a strict like-for-like pair. results/491_C7/
+# was produced before the warm start was fixed to reach every MustGo (it
+# used to cover 25 of 100, because KNN leaves few MustGo-to-MustGo arcs).
+# The feasible set is unchanged, but the search path is not, so the pair
+# differs in two things, not one. To attribute the whole difference to the
+# shift, re-run the baseline with the current code before comparing.
+# ══════════════════════════════════════════════════════════════════
+label: 491_C7_shift8h
+description: 491 paper/cardboard bins, cluster C7 — 8 h working day enforced
+
+paths:
+  coordinates: data/raw/coordinates_491_C7_Runa_Sobral_Arruda.xlsx
+  attributes:  data/raw/attributes_491_C7_paper.xlsx
+  ors_matrix:  data/matrices/distance_matrix_491_C7_Runa_Sobral_Arruda_ORS.xlsx
+  instance:    data/instances/instance_491_C7_paper.xlsx
+  results:     results/491_C7_shift8h
+
+model:
+  B: 16              # waste density                     [kg/m3]
+  Q: 4000            # vehicle capacity                  [kg]
+  R: 0.1625          # revenue per kg collected          [euro/kg]
+  C: 1.0             # travel cost                       [euro/km]
+  OMEGA: 0.1         # fixed cost per vehicle            [euro]
+  MAX_ROUTES: 2      # maximum number of routes (k <= MAX_ROUTES)
+  MIP_GAP: 0.05      # solver tolerance                  [0.05 = 5%]
+  TIME_LIMIT: 21600  # solver time limit                 [s] (6 h)
+
+# The whole point of this configuration.
+shift:
+  speed_kmh: 30
+  service_time_min: 1.5
+  report_h: [7, 8]
+  enforce: true
+  max_shift_h: 8
+
+lookahead:
+  days: 1
+  window: 2
+  threshold_mg: 100
+  threshold_overflow: 100
+  near_empty_level_pct: 5
+
+solver:
+  knn: 25
+  seed: 0
+  output_flag: 1
+  mip_focus: 1
+  heuristics: 0.5
+  threads: 8
+  cuts: 3
+  presolve: 1
+  node_method: 2
+  keep_mustgo_arcs: false
+  generate_maps: true
+
+ors:
+  transport_mode: driving-hgv
+  max_routes_per_request: 3500
+  pause_s: 1.6
+  manual_block: null
+  excel_sheet: 0
+  api_key_env: ORS_API_KEY

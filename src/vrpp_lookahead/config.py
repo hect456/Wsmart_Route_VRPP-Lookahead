@@ -96,6 +96,49 @@ class Model:
 
 
 @dataclass
+class Shift:
+    """Working day: how long a route actually costs a crew.
+
+    The objective function prices distance, never time, so a route that is
+    profitable on paper may not fit in a shift. These parameters convert a route
+    into hours of work and let that be checked — or, with `enforce: true`,
+    imposed on the solver as a hard constraint.
+
+    `speed_kmh` deliberately overrides the ORS travel times. ORS returns
+    free-flow driving times for the vehicle profile, which a collection round
+    does not achieve: it stops constantly, manoeuvres and restarts. A single
+    average round speed is an assumption the operator can state and defend.
+
+    `service_time_min` is the part the model ignored entirely until now, and it
+    is the one that matters here: it is what makes a stop cost something. With
+    it at zero, visiting 300 bins costs the same as visiting 100.
+    """
+
+    speed_kmh: float = 30.0           # average speed of the round (km/h)
+    service_time_min: float = 1.5     # time spent at each bin (min)
+    max_shift_h: float = 8.0          # shift length imposed when `enforce` is on (h)
+    enforce: bool = False             # True = hard constraint in the MILP
+    report_h: list = field(default_factory=lambda: [7.0, 8.0])   # reported as fits/exceeds
+
+    @property
+    def max_shift_min(self) -> float:
+        return self.max_shift_h * 60.0
+
+    def travel_min(self, km: float) -> float:
+        """Driving minutes for `km` at the configured average speed."""
+        return km / self.speed_kmh * 60.0
+
+    def route_min(self, km: float, n_bins: int) -> float:
+        """Total crew minutes: driving + one service stop per bin."""
+        return self.travel_min(km) + n_bins * self.service_time_min
+
+    def validate(self) -> None:
+        assert self.speed_kmh > 0, 'shift.speed_kmh must be > 0'
+        assert self.service_time_min >= 0, 'shift.service_time_min must be >= 0'
+        assert self.max_shift_h > 0, 'shift.max_shift_h must be > 0'
+
+
+@dataclass
 class Lookahead:
     """Horizon and thresholds of the MustGo / MustGoLA classification."""
 
@@ -167,6 +210,7 @@ class Config:
     root: Path = field(default_factory=Path.cwd)
     paths: Paths = field(default_factory=Paths)
     model: Model = field(default_factory=Model)
+    shift: Shift = field(default_factory=Shift)
     lookahead: Lookahead = field(default_factory=Lookahead)
     solver: Solver = field(default_factory=Solver)
     ors: ORS = field(default_factory=ORS)
@@ -184,6 +228,7 @@ class Config:
             root=root,
             paths=Paths(**(data.get('paths') or {})),
             model=Model(**(data.get('model') or {})),
+            shift=Shift(**(data.get('shift') or {})),
             lookahead=Lookahead(**(data.get('lookahead') or {})),
             solver=Solver(**(data.get('solver') or {})),
             ors=ORS(**(data.get('ors') or {})),
@@ -193,6 +238,7 @@ class Config:
 
     def validate(self) -> None:
         self.model.validate()
+        self.shift.validate()
         self.lookahead.validate()
 
     # ── paths ─────────────────────────────────────────────────────
@@ -213,6 +259,8 @@ class Config:
                 continue
             if key in MODEL_PARAMETERS:
                 setattr(self.model, key, value)
+            elif hasattr(self.shift, key):
+                setattr(self.shift, key, value)
             elif hasattr(self.lookahead, key):
                 setattr(self.lookahead, key, value)
             elif hasattr(self.solver, key):
@@ -229,7 +277,7 @@ class Config:
 
     # ── presentation ──────────────────────────────────────────────
     def summary(self) -> None:
-        m, la, sv = self.model, self.lookahead, self.solver
+        m, la, sv, sh = self.model, self.lookahead, self.solver, self.shift
         print(f'Instance    : {self.label}   {self.description}')
         print(f'Root        : {self.root}')
         print(f'B={m.B:g} kg/m3 | Q={m.Q:g} kg | MAX_ROUTES={m.MAX_ROUTES} '
@@ -238,3 +286,6 @@ class Config:
         print(f'MIP_GAP={m.MIP_GAP*100:g}% | TIME_LIMIT={m.TIME_LIMIT}s ({m.TIME_LIMIT/3600:g}h)')
         print(f'Days={la.days} | Window={la.window} | THR_MG={la.threshold_mg:g}% '
               f'| THR_OVF={la.threshold_overflow:g}% | KNN={sv.knn}')
+        print(f'Shift: {sh.speed_kmh:g} km/h | {sh.service_time_min:g} min/bin | '
+              + (f'max {sh.max_shift_h:g} h ENFORCED as a constraint'
+                 if sh.enforce else f'reported only against {sh.report_h} h (not enforced)'))

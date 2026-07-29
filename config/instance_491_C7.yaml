@@ -30,6 +30,19 @@ model:
   MIP_GAP: 0.05      # solver tolerance                  [0.05 = 5%]
   TIME_LIMIT: 21600  # solver time limit                 [s] (6 h)
 
+# ── Working day ────────────────────────────────────────────────────
+# The objective function prices distance, never time. These parameters turn a
+# route into hours of crew work so it can be checked against a real shift.
+# `speed_kmh` deliberately overrides the ORS travel times: ORS returns free-flow
+# driving times (~34 km/h on these routes), which a collection round stopping at
+# every bin does not achieve.
+shift:
+  speed_kmh: 30            # average speed of the round             [km/h]
+  service_time_min: 1.5    # time spent at each bin                 [min]
+  report_h: [7, 8]         # shift lengths reported as fits/exceeds [h]
+  enforce: false           # true = shift becomes a hard constraint in the MILP
+  max_shift_h: 8           # the limit imposed when enforce = true  [h]
+
 # ── Classification and horizon ─────────────────────────────────────
 lookahead:
   days: 1                    # simulated days

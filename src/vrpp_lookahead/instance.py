@@ -64,7 +64,11 @@ def build_instance(cfg: Config, dist_sheet: str | None = None,
     p_ors = cfg.path('ors_matrix')
     destination = cfg.path('instance', create_dir=True)
 
-    attr = pd.read_excel(p_attr)
+    # One workbook may hold several scenarios as separate sheets (a re-measured
+    # fill level, a different day). `paths.attributes_sheet` picks which one this
+    # instance is built from; 0 keeps the historical behaviour of reading the first.
+    sheet = cfg.paths.attributes_sheet
+    attr = pd.read_excel(p_attr, sheet_name=sheet)
     attr.columns = attr.columns.astype(str).str.strip()
     if 'ID_bin' in attr.columns and 'id_contentor' not in attr.columns:
         attr = attr.rename(columns={'ID_bin': 'id_contentor'})
@@ -118,7 +122,7 @@ def build_instance(cfg: Config, dist_sheet: str | None = None,
 
     print(f'Instance created: {destination}')
     print(f'  Nodes      : {len(ids)} (depot + {len(bin_ids)} bins)')
-    print(f'  Attributes : {p_attr.name}')
+    print(f'  Attributes : {p_attr.name}  (sheet {sheet!r})')
     print(f'  Coordinates: {p_coord.name}')
     print(f'  ORS matrix : {p_ors.name}  (sheets {dist_sheet} / {dur_sheet})')
     return destination
@@ -211,6 +215,11 @@ def load_instance(cfg: Config) -> Instance:
     # align the bin order with the matrices -> predictable indexing
     bins = bins.set_index('id_contentor').loc[ids[1:]].reset_index()
 
+    # A free fleet (`MAX_ROUTES: null`) is sized from the data, so it can only be
+    # resolved once the instance is on the table. Done here so that every entry
+    # point — solve, diagnose, comparison — sees the same resolved value.
+    resolve_max_routes(cfg, bins, dist)
+
     return Instance(
         bins=bins,
         ids=ids,
@@ -222,6 +231,63 @@ def load_instance(cfg: Config) -> Instance:
         ai_pct=bins.set_index('id_contentor')['ai'].to_dict(),
         label=cfg.label,
     )
+
+
+def _nearest_neighbour_km(dist: np.ndarray) -> float:
+    """Length of a nearest-neighbour tour from the depot over every node (km).
+
+    Only used to size a free fleet. It is a crude tour — typically 25 % longer
+    than the optimum — which is exactly the right bias here: over-estimating the
+    driving over-estimates the vehicles needed, and the bound must not bind.
+    """
+    n = len(dist)
+    unvisited = set(range(1, n))
+    cur, total = 0, 0.0
+    while unvisited:
+        nxt = min(unvisited, key=lambda j: dist[cur][j])
+        total += float(dist[cur][nxt])
+        unvisited.discard(nxt)
+        cur = nxt
+    return total + float(dist[cur][0])
+
+
+def resolve_max_routes(cfg: Config, bins: pd.DataFrame, dist: np.ndarray) -> int:
+    """Replace `MAX_ROUTES: null` by a fleet that cannot cap the solution.
+
+    "Free" cannot mean "unbounded": `k` is an integer variable and needs an upper
+    bound. It means the bound must be loose enough that removing it would change
+    nothing — i.e. enough vehicles to collect *every* bin of the instance. Two
+    resources can force an extra vehicle, so the bound is the larger of:
+
+      * capacity — ceil(total kg / Q);
+      * working day, when `shift.enforce` is on — ceil(total crew minutes /
+        shift), the minutes being a nearest-neighbour tour of all bins at the
+        shift speed plus one service stop per bin.
+
+    Without the second term a free fleet would silently collapse to the capacity
+    bound, which is wrong the moment the shift is what limits a route: two
+    vehicles hold all the waste of this instance, but they cannot be on the road
+    long enough to reach it.
+    """
+    mod, sh = cfg.model, cfg.shift
+    if mod.MAX_ROUTES is not None:
+        return mod.MAX_ROUTES
+
+    total_kg = float(bins['Si_kg'].sum())
+    k_cap = max(1, math.ceil(total_kg / mod.Q))
+
+    k_shift = 1
+    if sh.enforce:
+        tour_km = _nearest_neighbour_km(dist)
+        minutes = sh.route_min(tour_km, len(bins))
+        k_shift = max(1, math.ceil(minutes / sh.max_shift_min))
+
+    mod.MAX_ROUTES = max(k_cap, k_shift)
+    mod.MAX_ROUTES_auto = True
+    print(f'MAX_ROUTES  : free -> {mod.MAX_ROUTES} '
+          f'(capacity needs {k_cap}, working day needs {k_shift}) '
+          f'— a bound that cannot cap the solution, not a fleet decision')
+    return mod.MAX_ROUTES
 
 
 # ══════════════════════════════════════════════════════════════════

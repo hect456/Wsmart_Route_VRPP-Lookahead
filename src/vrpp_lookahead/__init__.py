@@ -8,7 +8,8 @@ Pipeline:
 Every parameter lives in `config.Config` (YAML file under config/).
 """
 from .config import Config, Lookahead, Model, ORS, Paths, Solver, runtime_environment
-from .instance import Instance, build_instance, diagnose, instance_summary, load_instance
+from .instance import (Instance, build_instance, diagnose, instance_summary, load_instance,
+                       resolve_max_routes)
 from .lookahead import LookaheadResult, lookahead
 from .ors_matrix import build_ors_matrix
 from .reporting import export_excel, export_summary, plot_routes
@@ -20,6 +21,7 @@ __version__ = '1.0.0'
 __all__ = [
     'Config', 'Model', 'Lookahead', 'Solver', 'ORS', 'Paths', 'runtime_environment',
     'Instance', 'build_instance', 'load_instance', 'instance_summary', 'diagnose',
+    'resolve_max_routes',
     'lookahead', 'LookaheadResult',
     'solve_vrpp', 'Solution',
     'plot_routes', 'export_excel', 'export_summary',

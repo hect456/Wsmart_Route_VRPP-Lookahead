@@ -265,6 +265,7 @@ description: 380 paper bins, my town
 paths:
   coordinates: data/raw/coordinates_mytown.xlsx     # ← your file A
   attributes:  data/raw/attributes_mytown.xlsx      # ← your file B
+  attributes_sheet: 0                               # ← which sheet of file B (name or index)
   ors_matrix:  data/matrices/distance_matrix_mytown.xlsx   # ← will be CREATED by step 1
   instance:    data/instances/instance_mytown.xlsx         # ← will be CREATED by step 2
   results:     results/mytown                              # ← will be CREATED by step 3
@@ -272,6 +273,12 @@ paths:
 
 Only the first two paths point at files you supply. The other three are **outputs**
 — you just choose where they get written, and the folders are created for you.
+
+`attributes_sheet` is how one workbook holds several scenarios: keep each set of
+fill levels in its own sheet and point a second config file at it. That is what
+`config/instance_491_C7_simul3107.yaml` does — same bins, same ORS matrix, the
+`contentores_simul3107` sheet instead of the first one. `0` (the default) reads
+the first sheet, which is the historical behaviour.
 
 Paths are relative to the project root, so `data/raw/...` means
 `vrpp-lookahead/data/raw/...`. Absolute paths work too.
@@ -421,6 +428,24 @@ If it warns that `MAX_ROUTES` is too low, raise `MAX_ROUTES` or `Q` before
 optimising — otherwise some mandatory bins get downgraded (see
 [section 11](#11-the-model)).
 
+**Not wanting to decide the fleet at all** is a legitimate answer too. Set
+`MAX_ROUTES: null` in the YAML (or pass `--MAX_ROUTES 0`) and the bound is
+derived from the instance instead of being imposed: enough vehicles to collect
+every bin, so removing the bound would change nothing. Two resources can force
+an extra vehicle and both are taken into account — the capacity
+(`ceil(total kg / Q)`) and, when `shift.enforce` is on, the working day
+(`ceil(crew minutes / shift)`, over a nearest-neighbour tour of all bins). The
+second term matters: on a network with little waste but long distances, two
+vehicles hold everything and still cannot be on the road long enough to reach
+it. The resolved value is printed when the instance loads:
+
+```
+MAX_ROUTES  : free -> 4 (capacity needs 2, working day needs 4) — a bound that
+              cannot cap the solution, not a fleet decision
+```
+
+The solver then uses as many as it finds profitable — often fewer than the bound.
+
 Then run the real thing:
 
 ```bash
@@ -496,7 +521,7 @@ section are the most frequently touched:
 | `R` | revenue per kg collected | €/kg | 0.1625 | `--R` |
 | `C` | travel cost | €/km | 1.0 | `--C` |
 | `OMEGA` | fixed cost per vehicle | € | 0.1 | `--OMEGA` |
-| `MAX_ROUTES` | max number of routes (`k ≤ MAX_ROUTES`) | — | 2 | `--MAX_ROUTES` |
+| `MAX_ROUTES` | max number of routes (`k ≤ MAX_ROUTES`); `null` = free fleet | — | 2 | `--MAX_ROUTES` (`0` = free) |
 | `MIP_GAP` | solver tolerance | — | 0.05 (5 %) | `--MIP_GAP` |
 | `TIME_LIMIT` | solver time limit | s | 21600 (6 h) | `--TIME_LIMIT` |
 

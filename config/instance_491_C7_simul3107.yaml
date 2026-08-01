@@ -1,0 +1,84 @@
+# ══════════════════════════════════════════════════════════════════
+# Instance 491_C7_simul3107 — same 491 bins and the same ORS matrix as
+# the other configurations, but a DIFFERENT STATE of the bins: the fill
+# levels of the `contentores_simul3107` sheet (31/07 simulation), not
+# those of the first sheet.
+#
+# Three things change against instance_491_C7_shift8h.yaml, and they are
+# the three the operator asked for:
+#
+#   1. the data       — attributes_sheet: contentores_simul3107
+#                       (6 057 kg of waste on the ground, against 10 414
+#                        in the original sheet: a much emptier network)
+#   2. the working day — 35 km/h, 1.7 min per bin, 7 h ENFORCED
+#   3. the fleet       — MAX_ROUTES: null, i.e. free. The solver decides
+#                        how many vehicles to send; it is no longer told
+#                        "two". See instance.resolve_max_routes.
+#
+# This is the configuration the EVOX route of 31/07 is compared against
+# (data/raw/evox_routes_491_C7_simul3107.yaml). The 1.7 min per stop is the
+# operator's own figure and is deliberately ABOVE what EVOX assumed: the
+# 01:42 of stop time it reports over 68 bins is exactly 1.5 min per stop.
+# Both solutions are then re-measured at 1.7 by the same code, so the
+# comparison stays like-for-like; only the "EVOX reported" column keeps the
+# 102 min EVOX published, and the Notes sheet says so.
+# ══════════════════════════════════════════════════════════════════
+label: 491_C7_simul3107
+description: 491 paper/cardboard bins, cluster C7 — 31/07 fill levels, 7 h day, free fleet
+
+paths:
+  coordinates:      data/raw/coordinates_491_C7_Runa_Sobral_Arruda.xlsx
+  attributes:       data/raw/attributes_491_C7_paper.xlsx
+  attributes_sheet: contentores_simul3107     # <- the new instance lives in this sheet
+  ors_matrix:       data/matrices/distance_matrix_491_C7_Runa_Sobral_Arruda_ORS.xlsx
+  instance:         data/instances/instance_491_C7_simul3107.xlsx
+  results:          results/491_C7_simul3107
+
+model:
+  B: 16              # waste density                     [kg/m3]
+  Q: 4000            # vehicle capacity                  [kg]
+  R: 0.1625          # revenue per kg collected          [euro/kg]
+  C: 1.0             # travel cost                       [euro/km]
+  OMEGA: 0.1         # fixed cost per vehicle            [euro]
+  MAX_ROUTES: null   # FREE FLEET — no cap imposed; the bound is derived
+                     # from the instance (capacity and working day) so that
+                     # it cannot be what limits the solution.
+  MIP_GAP: 0.05      # solver tolerance                  [0.05 = 5%]
+  TIME_LIMIT: 5400   # solver time limit                 [s] (1.5 h)
+
+# EVOX's own operating parameters, so that both solutions are measured
+# with the same yardstick.
+shift:
+  speed_kmh: 35            # average speed of the round        [km/h]
+  service_time_min: 1.7    # 1.7 min per bin (0.0283 h)
+  max_shift_h: 7           # 7 h maximum working day
+  enforce: true            # hard constraint in the MILP, not a report
+  report_h: [7, 8]
+
+lookahead:
+  days: 1
+  window: 2
+  threshold_mg: 100
+  threshold_overflow: 100
+  near_empty_level_pct: 5
+
+solver:
+  knn: 25
+  seed: 0
+  output_flag: 1
+  mip_focus: 1
+  heuristics: 0.5
+  threads: 8
+  cuts: 3
+  presolve: 1
+  node_method: 2
+  keep_mustgo_arcs: false
+  generate_maps: true
+
+ors:
+  transport_mode: driving-hgv
+  max_routes_per_request: 3500
+  pause_s: 1.6
+  manual_block: null
+  excel_sheet: 0
+  api_key_env: ORS_API_KEY

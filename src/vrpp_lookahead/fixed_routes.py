@@ -43,6 +43,7 @@ TOTAL_ROWS_SHIFT = (
     ('Routes over the shift limits', 'n_routes_over_shift'),
 )
 TOTAL_ROWS = (
+    ('Routes used (vehicles)', 'n_routes'),
     ('Total bins not visited (no coverage)', 'n_not_visited'),
     ('  of which MustGo (uncovered)', 'n_mustgo_missed'),
     ('  of which MustGo-LookAhead (uncovered)', 'n_mustgo_la_missed'),

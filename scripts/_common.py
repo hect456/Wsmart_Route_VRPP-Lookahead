@@ -47,7 +47,8 @@ def add_model_arguments(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
     g.add_argument('--C', type=float, help='travel cost (euro/km)')
     g.add_argument('--OMEGA', type=float, help='fixed cost per vehicle (euro)')
     g.add_argument('--MAX_ROUTES', '--max-routes', dest='MAX_ROUTES', type=int,
-                   help='maximum number of routes (k <= MAX_ROUTES)')
+                   help='maximum number of routes (k <= MAX_ROUTES); 0 = free fleet, '
+                        'sized from the instance so the bound cannot bind')
     g.add_argument('--MIP_GAP', '--mip-gap', dest='MIP_GAP', type=float,
                    help='solver tolerance (0.05 = 5%%)')
     g.add_argument('--TIME_LIMIT', '--time-limit', dest='TIME_LIMIT', type=int,
@@ -62,6 +63,12 @@ def add_model_arguments(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
                    type=float, help='%% for MustGoLA')
     h.add_argument('--knn', type=int, help='nearest neighbours per node')
     h.add_argument('--seed', type=int, help='Gurobi seed')
+    h.add_argument('--mip-focus', dest='mip_focus', type=int,
+                   help='Gurobi MIPFocus: 1 = find solutions, 2 = prove optimality, '
+                        '3 = move the objective bound (use when the bound has stalled)')
+    h.add_argument('--warm-start', dest='warm_start_from',
+                   help='result_Day_XX.xlsx of an earlier run on the SAME instance, used as '
+                        'the MIP start instead of the greedy walk')
     h.add_argument('--no-maps', dest='generate_maps', action='store_false', default=None,
                    help='do not generate the Folium maps')
     return p
@@ -69,7 +76,7 @@ def add_model_arguments(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
 
 OVERRIDE_KEYS = ('B', 'Q', 'R', 'C', 'OMEGA', 'MAX_ROUTES', 'MIP_GAP', 'TIME_LIMIT',
                  'days', 'window', 'threshold_mg', 'threshold_overflow', 'knn', 'seed',
-                 'generate_maps')
+                 'mip_focus', 'warm_start_from', 'generate_maps')
 
 
 def overrides(args: argparse.Namespace) -> dict:

@@ -188,6 +188,55 @@ def _warm_start(NR, dep, S, D, cfg: Config, mandatory, arcs_s):
     return routes
 
 
+def _warm_start_from_workbook(path, id_map, arcs_s, dep, cfg: Config):
+    """MIP start read from a previous result workbook instead of the greedy walk.
+
+    Returns None — and says why — whenever the stored solution cannot be
+    expressed in this model: a bin that is not in the instance, an arc the KNN
+    filter removed, or more routes than MAX_ROUTES now allows. A rejected start
+    costs one printed line; a silently wrong one costs the whole run, because
+    Gurobi would discard it and report nothing.
+    """
+    from pathlib import Path
+
+    from .fixed_routes import routes_from_solution_workbook
+
+    p = Path(path)
+    p = p if p.is_absolute() else (cfg.root / p)
+    if not p.exists():
+        print(f'  Warm start: {p} not found — falling back to the greedy walk.')
+        return None
+
+    routes = routes_from_solution_workbook(p)
+    if len(routes) > cfg.model.MAX_ROUTES:
+        print(f'  Warm start: stored solution has {len(routes)} routes, MAX_ROUTES is '
+              f'{cfg.model.MAX_ROUTES} — discarded, falling back to the greedy walk.')
+        return None
+
+    pos = {b: i for i, b in id_map.items()}
+    out = []
+    for nr in sorted(routes):
+        unknown = [b for b in routes[nr] if b not in pos]
+        if unknown:
+            print(f'  Warm start: route {nr} names {len(unknown)} bins absent from this '
+                  f'instance — discarded, falling back to the greedy walk.')
+            return None
+        seq = [pos[b] for b in routes[nr]]
+        if not seq:
+            continue
+        arcs = list(zip([dep] + seq, seq + [dep]))
+        missing = [a for a in arcs if a not in arcs_s]
+        if missing:
+            print(f'  Warm start: route {nr} uses {len(missing)} arcs this model filtered '
+                  f'out — discarded, falling back to the greedy walk.')
+            return None
+        out.append(arcs)
+
+    print(f'  Warm start: resumed from {p.name} '
+          f'({len(out)} route(s), {sum(len(r) - 1 for r in out)} bins)')
+    return out
+
+
 def _extract_routes(active, dep):
     """Rebuilds the routes from the active arcs; also returns orphan arcs."""
     out: dict = {}
@@ -250,7 +299,8 @@ def solve_vrpp(state: pd.DataFrame, la: LookaheadResult, inst: Instance,
     print(f'  KNN={st["knn"]} (bidirectional) | Removed by capacity: {st["n_cap_removed"]}')
     print(f'  Forced MG    : {len(mg_ids)}  |  total S: {sum(S[i] for i in NR):.1f} kg '
           f'(mean {sum(S[i] for i in NR)/len(NR):.2f} kg/point)')
-    print(f'  *** ACTIVE CONSTRAINT: k <= {mod.MAX_ROUTES} routes ***')
+    print(f'  *** {"FLEET BOUND (free fleet, sized not to bind)" if mod.MAX_ROUTES_auto else "ACTIVE CONSTRAINT"}'
+          f': k <= {mod.MAX_ROUTES} routes ***')
 
     # ── 3. model ───────────────────────────────────────────────────
     mdl = gp.Model(f'VRPP_{cfg.label}')
@@ -332,7 +382,11 @@ def solve_vrpp(state: pd.DataFrame, la: LookaheadResult, inst: Instance,
                      - mod.OMEGA * k, GRB.MAXIMIZE)
 
     # ── 4. warm start ──────────────────────────────────────────────
-    ws_routes = _warm_start(NR, dep, S, D, cfg, mg_ids, arcs_s)
+    ws_routes = None
+    if sv.warm_start_from:
+        ws_routes = _warm_start_from_workbook(sv.warm_start_from, id_map, arcs_s, dep, cfg)
+    if ws_routes is None:
+        ws_routes = _warm_start(NR, dep, S, D, cfg, mg_ids, arcs_s)
     ws_arcs = {a for rt in ws_routes for a in rt}
     ws_nodes = {j for rt in ws_routes for (_, j) in rt if j != dep}
     for i, j in arcs:

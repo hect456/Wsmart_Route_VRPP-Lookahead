@@ -1,0 +1,40 @@
+# EVOX solution of 31/07 for instance 491_C7_simul3107 — bin ids in VISIT ORDER.
+# The depot (id 0) is implicit: the route starts and ends there.
+#
+# ONE route, 68 bins. Compared against the free-fleet VRPP run of
+# config/instance_491_C7_simul3107.yaml, which is allowed to send as many
+# vehicles as it finds profitable inside a 7 h day.
+routes:
+  1: [663, 4209, 687, 504, 498, 3265, 497, 8364, 482, 2960,
+      2294, 3883, 2845, 284, 1791, 3878, 277, 3188, 289, 3925,
+      3886, 272, 5172, 3924, 2957, 2704, 3972, 3966, 3962, 2114,
+      7517, 6257, 1233, 3192, 312, 2783, 2878, 315, 3936, 3938,
+      3954, 4364, 6256, 2113, 3950, 3942, 3949, 6066, 2322, 5456,
+      9981, 326, 263, 265, 2848, 266, 3900, 1297, 267, 3922,
+      2015, 7502, 3096, 9850, 499, 7493, 672, 664]
+
+# KPI as reported by EVOX itself, for the left block of the comparison report.
+# Anything left as null is shown as n/a and excluded from the "Differences" column.
+#
+# Mapping of the EVOX dashboard onto the keys of this project:
+#   68 Locais        -> n_bins
+#   195,0 km         -> distance_km
+#   2188,2 kg        -> weight_kg
+#   89,1 km/ton      -> km_per_ton
+#   160,59 Lucro     -> profit_euro   (= R*kg - C*km, i.e. without OMEGA)
+#   05:12 Tempo viagem -> shift_driving_min = 312 min.  NOT travel_time_min:
+#       that row is the free-flow driving time of the ORS matrix, which is a
+#       different quantity. 195 km in 312 min is an implied 37.5 km/h, against
+#       the 35 km/h the operator set for this study — see the Notes sheet.
+#   01:42 Tempo paragem -> shift_service_min = 102 min, i.e. 68 bins x 1.5 min.
+#       The study is configured at 1.7 min per bin, so the same 68 stops are
+#       re-measured at 115.6 min. That row therefore differs by definition, not
+#       by result — see the Notes sheet, which derives the implied rate.
+reported:
+  1: {n_bins: 68, n_mustgo: null, n_mustgo_la: null, n_optional: null,
+      weight_kg: 2188.2, distance_km: 195.0, profit_euro: 160.59,
+      km_per_ton: 89.1, cap_used_pct: null, travel_time_min: null,
+      shift_driving_min: 312, shift_service_min: 102, shift_total_h: 6.9}
+  totals: {n_routes: 1, n_not_visited: null, total_distance_km: 195.0, total_weight_kg: 2188.2,
+           total_profit_euro: 160.59, total_km_per_ton: 89.1,
+           max_shift_total_h: 6.9}

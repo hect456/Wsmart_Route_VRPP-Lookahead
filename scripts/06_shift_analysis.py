@@ -97,6 +97,63 @@ def analyse(solutions: dict, inst, cfg: Config) -> tuple:
     return pd.DataFrame(rows), pd.DataFrame(detail)
 
 
+def build_marginal(summary: pd.DataFrame, cfg: Config) -> pd.DataFrame:
+    """What each extra vehicle actually buys, once its crew hours are counted.
+
+    The objective cannot answer "how many vehicles". It prices a vehicle at
+    OMEGA — 0.1 EUR here — and prices the crew's time at nothing at all, so any
+    bin whose waste is worth more than the kilometres to reach it makes a new
+    vehicle worth sending. Left free, the model will therefore keep adding
+    vehicles until it runs out of profitable bins. That is not a fleet
+    recommendation; it is the consequence of a cost the model does not carry.
+
+    The decision has to be made outside the objective, and this is the table
+    that supports it: sort the runs by fleet size and read what the Nth vehicle
+    adds in profit against the ~one shift of crew time it costs. The operator
+    compares that euro-per-crew-hour against what an hour of crew actually costs
+    them — a number this project does not have and does not invent.
+
+    Only meaningful across runs of the SAME instance and parameters that differ
+    in nothing but the fleet cap.
+    """
+    df = summary.sort_values('Routes').reset_index(drop=True)
+    rows = []
+    for n in range(len(df)):
+        cur = df.loc[n]
+        row = {
+            'Solution': cur['Solution'],
+            'Routes': cur['Routes'],
+            'Crew_hours': cur['Crew_hours'],
+            'Weight_kg': cur['Weight_kg'],
+            'Profit_euro': cur['Profit_euro'],
+            'euro_per_crew_hour': cur['euro_per_crew_hour'],
+        }
+        if n == 0:
+            row.update({'Extra_crew_hours': '', 'Extra_weight_kg': '',
+                        'Extra_profit_euro': '', 'Marginal_euro_per_crew_hour': '',
+                        'Marginal_vs_average': ''})
+        else:
+            prev = df.loc[n - 1]
+            d_h = round(cur['Crew_hours'] - prev['Crew_hours'], 2)
+            d_kg = round(cur['Weight_kg'] - prev['Weight_kg'], 1)
+            d_eur = round(cur['Profit_euro'] - prev['Profit_euro'], 2)
+            marginal = round(d_eur / d_h, 2) if d_h else float('nan')
+            row.update({
+                'Extra_crew_hours': d_h,
+                'Extra_weight_kg': d_kg,
+                'Extra_profit_euro': d_eur,
+                'Marginal_euro_per_crew_hour': marginal,
+                # The comparison that matters: an extra vehicle that earns less
+                # per hour than the ones already out is diluting the operation
+                # even while it raises the headline total.
+                'Marginal_vs_average': ('below the average — dilutes'
+                                        if marginal < prev['euro_per_crew_hour']
+                                        else 'above the average — improves'),
+            })
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def build_findings(summary: pd.DataFrame, baseline: str, cfg: Config) -> pd.DataFrame:
     """The readings that only become visible once hours are in the denominator."""
     if baseline not in set(summary['Solution']):
@@ -127,6 +184,21 @@ def build_findings(summary: pd.DataFrame, baseline: str, cfg: Config) -> pd.Data
                 f'comparison invites. Per crew hour: {rel(row, "kg_per_crew_hour"):+.1f} % kg '
                 f'and {rel(row, "euro_per_crew_hour"):+.1f} % euro. The advantage that survives '
                 f'the normalisation is the defensible one.'),
+        })
+
+    if summary['Routes'].nunique() > 1:
+        best = summary.loc[summary['euro_per_crew_hour'].idxmax()]
+        out.append({
+            'Topic': 'How many vehicles',
+            'Reading': (
+                f'The objective cannot answer this. It charges OMEGA={cfg.model.OMEGA:g} EUR for a '
+                f'vehicle and nothing at all for the crew\'s time, so a free fleet keeps adding '
+                f'vehicles while any profitable bin is left — a consequence of a cost the model '
+                f'does not carry, not a fleet recommendation. Per crew hour the best of the runs '
+                f'compared here is {best["Solution"]} at {best["euro_per_crew_hour"]:.2f} EUR/h '
+                f'with {best["Routes"]} route(s). See the Marginal_vehicle sheet for what each '
+                f'extra vehicle adds, and compare it against what an hour of crew actually costs '
+                f'you — a figure this project does not have.'),
         })
 
     for _, row in summary.iterrows():
@@ -176,9 +248,12 @@ def main() -> None:
           f'shift limit {cfg.shift.max_shift_h:g} h\n')
 
     summary, detail = analyse(solutions, inst, cfg)
+    marginal = build_marginal(summary, cfg)
     findings = build_findings(summary, args.baseline or summary['Solution'].iloc[0], cfg)
 
     print(summary.to_string(index=False))
+    print('\n--- Marginal value of each extra vehicle ---')
+    print(marginal.to_string(index=False))
     print('\n--- Per route ---')
     print(detail.to_string(index=False))
     print('\n--- Findings ---')
@@ -189,9 +264,11 @@ def main() -> None:
                        f'shift_analysis_{cfg.label}.xlsx')
     with pd.ExcelWriter(out, engine='openpyxl') as w:
         summary.to_excel(w, sheet_name='Summary', index=False)
+        marginal.to_excel(w, sheet_name='Marginal_vehicle', index=False)
         detail.to_excel(w, sheet_name='Per_route', index=False)
         findings.to_excel(w, sheet_name='Findings', index=False)
-        for name, width in (('Summary', 22), ('Per_route', 16), ('Findings', 30)):
+        for name, width in (('Summary', 22), ('Marginal_vehicle', 22),
+                            ('Per_route', 16), ('Findings', 30)):
             ws = w.sheets[name]
             ws.column_dimensions['A'].width = width
             if name == 'Findings':

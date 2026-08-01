@@ -79,18 +79,32 @@ class Model:
     R: float = 0.1625        # revenue (euro/kg)
     C: float = 1.0           # travel cost (euro/km)
     OMEGA: float = 0.1       # fixed cost per vehicle (euro)
-    MAX_ROUTES: int = 2      # k <= MAX_ROUTES
+    MAX_ROUTES: int | None = 2   # k <= MAX_ROUTES; None/0 = free fleet (see below)
     MIP_GAP: float = 0.05    # solver tolerance
     TIME_LIMIT: int = 21600  # solver time limit (s)
+    MAX_ROUTES_auto: bool = field(default=False, init=False)   # set by the resolver
+
+    # `MAX_ROUTES: null` in the YAML (or `--max-routes 0`) means "do not cap the
+    # fleet": `instance.resolve_max_routes` then replaces it with a bound large
+    # enough to collect every bin, which therefore cannot bind the solution. The
+    # bound still exists — `k` is an integer variable and needs one — but it is
+    # derived from the data instead of being imposed by the analyst.
 
     @property
     def fleet_capacity_kg(self) -> float:
-        return self.MAX_ROUTES * self.Q
+        return float('inf') if self.MAX_ROUTES is None else self.MAX_ROUTES * self.Q
+
+    @property
+    def max_routes_label(self) -> str:
+        if self.MAX_ROUTES is None:
+            return 'free (resolved from the instance)'
+        return f'{self.MAX_ROUTES}' + (' (auto — free fleet)' if self.MAX_ROUTES_auto else '')
 
     def validate(self) -> None:
         assert self.B > 0, 'B must be > 0'
         assert self.Q > 0, 'Q must be > 0'
-        assert self.MAX_ROUTES >= 1, 'MAX_ROUTES must be >= 1'
+        assert self.MAX_ROUTES is None or self.MAX_ROUTES >= 1, \
+            'MAX_ROUTES must be >= 1, or null for a free fleet'
         assert 0 <= self.MIP_GAP < 1, 'MIP_GAP must be in [0, 1)'
         assert self.TIME_LIMIT > 0, 'TIME_LIMIT must be > 0'
 
@@ -168,6 +182,19 @@ class Solver:
     node_method: int = 2
     keep_mustgo_arcs: bool = False   # True = never filter out MustGo-MustGo arcs
     generate_maps: bool = True
+    warm_start_from: str = ''        # result workbook to resume from (see below)
+
+    # `warm_start_from` hands the solver a previous solution as its MIP start
+    # instead of the greedy nearest-neighbour walk. It exists for one situation:
+    # re-solving the same instance with a different search strategy — typically
+    # `mip_focus: 3` when the objective bound has stalled — without throwing away
+    # the incumbent the earlier run already paid for. MIPFocus=3 stops hunting for
+    # feasible solutions, so starting it from scratch can end with a worse
+    # incumbent AND an unclosed gap.
+    #
+    # Only valid for a workbook produced from the SAME instance and day: the node
+    # numbering must match. Mismatched or filtered-out arcs are detected and the
+    # start is discarded rather than silently corrupting the run.
 
 
 @dataclass
@@ -198,6 +225,7 @@ class Paths:
 
     coordinates: str = ''   # input: ID_bin | Latitude | Longitude
     attributes: str = ''    # input: id_contentor | Si | ai | Vol_cont | Vol_kg | Ncont
+    attributes_sheet: Any = 0   # sheet of that workbook: name or 0-based index
     ors_matrix: str = ''    # step 1 output / step 2 input
     instance: str = ''      # step 2 output / step 3 input (4-sheet workbook)
     results: str = ''       # step 3 output
@@ -258,6 +286,10 @@ class Config:
             if value is None:
                 continue
             if key in MODEL_PARAMETERS:
+                # --max-routes 0 is how a free fleet is asked for on the command
+                # line, where `null` cannot be typed.
+                if key == 'MAX_ROUTES' and value == 0:
+                    value = None
                 setattr(self.model, key, value)
             elif hasattr(self.shift, key):
                 setattr(self.shift, key, value)
@@ -280,7 +312,7 @@ class Config:
         m, la, sv, sh = self.model, self.lookahead, self.solver, self.shift
         print(f'Instance    : {self.label}   {self.description}')
         print(f'Root        : {self.root}')
-        print(f'B={m.B:g} kg/m3 | Q={m.Q:g} kg | MAX_ROUTES={m.MAX_ROUTES} '
+        print(f'B={m.B:g} kg/m3 | Q={m.Q:g} kg | MAX_ROUTES={m.max_routes_label} '
               f'-> fleet {m.fleet_capacity_kg:g} kg')
         print(f'R={m.R:g} eur/kg | C={m.C:g} eur/km | OMEGA={m.OMEGA:g} eur/vehicle')
         print(f'MIP_GAP={m.MIP_GAP*100:g}% | TIME_LIMIT={m.TIME_LIMIT}s ({m.TIME_LIMIT/3600:g}h)')

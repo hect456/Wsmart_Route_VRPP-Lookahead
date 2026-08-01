@@ -164,6 +164,40 @@ def build_notes(metrics_fix, metrics_opt, reported: dict, cfg: Config,
                            f'(gap {gap:+} km, {pct:+.1f} %). Computed over the supplied visiting '
                            f'order with the {cfg.ors.transport_mode} ORS profile.'),
             })
+        # Same for the stop time: n_bins and the reported service minutes pin down
+        # the rate the external system assumed, which is the other half of the day.
+        service_rep = rep.get('shift_service_min')
+        n_rep = rep.get('n_bins') or fix.loc[r, 'n_bins']
+        if service_rep and n_rep:
+            implied = float(service_rep) / float(n_rep)
+            same = abs(implied - cfg.shift.service_time_min) < 0.01
+            notes.append({
+                'Topic': f'Route {r} — implied service time',
+                'Detail': (f'{service_rep} min of stop time over {n_rep:g} bins is an implied '
+                           f'{implied:.2f} min per bin, against the '
+                           f'{cfg.shift.service_time_min:g} min configured for this study'
+                           + ('— the same assumption, so the stop times are comparable.' if same else
+                              f'. Re-measured at {cfg.shift.service_time_min:g} min the same '
+                              f'{n_rep:g} stops cost {fix.loc[r, "shift_service_min"]:.1f} min. '
+                              f'That row differs by definition, not by result — and it is the '
+                              f'stricter figure that both solutions are held to here.')),
+            })
+        # Where the external system publishes both a distance and a driving time,
+        # the ratio pins down the speed it actually assumed — the one parameter
+        # that silently decides whether a route fits in the shift.
+        drive_rep = rep.get('shift_driving_min')
+        if d_rep is not None and drive_rep:
+            implied = float(d_rep) / (float(drive_rep) / 60.0)
+            notes.append({
+                'Topic': f'Route {r} — implied average speed',
+                'Detail': (f'{d_rep} km in {drive_rep} min is an implied {implied:.1f} km/h, '
+                           f'against the {cfg.shift.speed_kmh:g} km/h configured for this study'
+                           + (' — the same assumption, so the two driving times are comparable.'
+                              if abs(implied - cfg.shift.speed_kmh) < 0.5 else
+                              f'. At {cfg.shift.speed_kmh:g} km/h the very same kilometres take '
+                              f'{fix.loc[r, "shift_driving_min"]:.0f} min, which is why the '
+                              f'working-day rows differ even when the route does not.')),
+            })
         if p_rep is not None and w_rep is not None and d_rep is not None:
             no_omega = mod.R * float(w_rep) - mod.C * float(d_rep)
             if abs(no_omega - float(p_rep)) < 0.01:
@@ -229,13 +263,29 @@ def build_interpretation(metrics_fix, metrics_opt, reported: dict, cfg: Config,
 
     items = []
     if ext_km and ext_kg:
+        more_kg = o['total_weight_kg'] > ext_kg
+        more_km = o['total_distance_km'] > ext_km
+        if more_kg and not more_km:
+            verdict = ('It is not a trade-off between distance and capture: the VRPP wins on '
+                       'both at once.')
+        elif more_kg and more_km:
+            verdict = ('The VRPP buys the extra waste with extra kilometres, so distance alone '
+                       'settles nothing here — the km/Ton ratio and the profit line below are '
+                       'what decide whether the trade is worth making.')
+        elif not more_kg and not more_km:
+            verdict = ('The VRPP drives less and collects less: it stops where the next bin no '
+                       'longer pays for the kilometres to reach it, which is exactly what the '
+                       'objective asks it to do.')
+        else:
+            verdict = ('The VRPP collects less over more kilometres, which should not happen — '
+                       'check the MIP gap on the Notes sheet before reading anything into it.')
         items.append((
             'Headline',
             f'Against the figures EVOX reports for itself, the optimal VRPP collects '
             f'{o["total_weight_kg"]:.1f} kg versus {ext_kg:.1f} kg ({pct(o["total_weight_kg"], ext_kg)}) '
             f'while driving {o["total_distance_km"]:.2f} km versus {ext_km:.1f} km '
-            f'({pct(o["total_distance_km"], ext_km)}). It is not a trade-off between distance '
-            f'and capture: the VRPP wins on both at once.'))
+            f'({pct(o["total_distance_km"], ext_km)}), with '
+            f'{o["n_routes"]} vehicle(s) against {f["n_routes"]}. {verdict}'))
     if ext_eur:
         items.append((
             'Profit',
@@ -250,47 +300,99 @@ def build_interpretation(metrics_fix, metrics_opt, reported: dict, cfg: Config,
             f'({pct(o["total_km_per_ton"], ext_ratio)}). This is the metric that summarises the '
             f'difference best, because it normalises distance by what was actually collected.'))
 
+    opt_route = metrics_opt.per_route
     used = fix_route['cap_used_pct'].tolist()
+    used_opt = opt_route['cap_used_pct'].tolist()
+    idle = len(fix_route) * cfg.model.Q - f['total_weight_kg']
+    # Whether an under-filled vehicle is a fault of the routing or of the network
+    # depends on how much waste is on the ground at all — say which one it is.
+    on_ground = float(inst.bins['Si_kg'].sum())
+    if used_opt and max(used_opt) < 70.0:
+        fill_reading = (
+            f'Neither fills a vehicle, and neither can: the whole network holds {on_ground:.0f} kg '
+            f'today, only {on_ground / cfg.model.Q:.1f} times what a single {cfg.model.Q:g} kg '
+            f'vehicle carries — and most of it sits in bins too far apart to be worth the '
+            f'kilometres. On this instance the truck is not the scarce resource, so a low fill '
+            f'rate is not evidence of a bad route.')
+    else:
+        fill_reading = (
+            f'It leaves {idle:.0f} kg of the capacity it did send unused while paying the fixed '
+            f'cost and most of the driving. With bins {inst.dist[inst.dist > 0].mean():.1f} km '
+            f'apart on average, an extra stop costs little distance and adds weight, so a '
+            f'half-empty vehicle is rarely the cheapest way to run the day.')
     items.append((
-        'Root cause: vehicle fill',
-        f'The external solution runs its vehicles at '
-        f'{" and ".join(f"{u:.1f} %" for u in used)} of capacity, against roughly 100 % for the '
-        f'optimal solution. That leaves '
-        f'{cfg.model.fleet_capacity_kg - f["total_weight_kg"]:.0f} kg of fleet capacity unused '
-        f'while paying the fixed cost and most of the driving. With bins '
-        f'{inst.dist[inst.dist > 0].mean():.1f} km apart on average, each extra stop costs little '
-        f'distance and adds a lot of weight — which is why the optimal solution serves '
-        f'{len(metrics_opt.per_route)} routes with far more stops for almost the same kilometres.'))
+        'Vehicle fill',
+        f'The external solution runs its {len(fix_route)} vehicle(s) at '
+        f'{" and ".join(f"{u:.1f} %" for u in used)} of capacity, against '
+        f'{" and ".join(f"{u:.1f} %" for u in used_opt)} for the optimal solution. '
+        + fill_reading))
+
+    # Which resource actually stops the optimal solution. Saying "fill the truck"
+    # when the clock is what binds would point the operator at the wrong lever.
+    sh = cfg.shift
+    fill_max = max(used_opt) if used_opt else 0.0
+    day_max = o['max_shift_total_h']
+    if fill_max >= 95.0:
+        binding = (f'vehicle capacity — the fullest route is at {fill_max:.1f} % of Q='
+                   f'{cfg.model.Q:g} kg. A bigger vehicle would collect more.')
+    elif sh.enforce and day_max >= sh.max_shift_h - 0.15:
+        binding = (f'the working day — the longest route runs {day_max:.2f} h against the '
+                   f'{sh.max_shift_h:g} h limit, while the fullest vehicle is only '
+                   f'{fill_max:.1f} % loaded. Capacity is not the scarce resource here; hours '
+                   f'are. More waste can only be reached by adding a vehicle (another 7 h of '
+                   f'crew time), never by fitting more into the ones already out.')
+    else:
+        binding = (f'neither capacity ({fill_max:.1f} % of Q) nor the working day '
+                   f'({day_max:.2f} h of {sh.max_shift_h:g} h): the solution stops where the '
+                   f'next bin stops paying for the kilometres needed to reach it.')
+    items.append(('Binding resource', f'What limits the optimal solution is {binding}'))
 
     items.append((
         'Critical coverage',
-        f'The external routes leave {f["n_mustgo_missed"]} MustGo bin(s) uncovered — these '
-        f'overflow the next day — while collecting '
-        f'{int(fix_route["n_optional"].sum())} optional bins that are not urgent. The optimal '
-        f'solution covers every MustGo and every MustGo-LookAhead bin and still has room for '
-        f'{int(metrics_opt.per_route["n_optional"].sum())} profitable optional bins.'))
+        f'The external routes leave {f["n_mustgo_missed"]} MustGo and {f["n_mustgo_la_missed"]} '
+        f'MustGo-LookAhead bin(s) uncovered — an uncovered MustGo overflows the next day — while '
+        f'collecting {int(fix_route["n_optional"].sum())} optional bins that are not urgent. The '
+        f'optimal solution leaves {o["n_mustgo_missed"]} and {o["n_mustgo_la_missed"]} uncovered '
+        f'and collects {int(opt_route["n_optional"].sum())} optional bins.'))
 
+    fleet_note = ('sized freely by the model' if cfg.model.MAX_ROUTES_auto
+                  else f'capped at MAX_ROUTES={cfg.model.MAX_ROUTES}')
     items.append((
-        'Route balance',
-        f'The external solution balances its two routes; the optimal one deliberately does not '
-        f'({" and ".join(f"{d:.2f} km" for d in metrics_opt.per_route["distance_km"])}), because '
-        f'it maximises joint profit rather than symmetry. If an even workload across drivers is a '
-        f'real operational requirement, it has to be added to the model — it is not there today.'))
+        'Fleet and route balance',
+        f'The external solution sends {len(fix_route)} vehicle(s) '
+        f'({" and ".join(f"{d:.2f} km" for d in fix_route["distance_km"])}); the optimal one, '
+        f'{fleet_note}, sends {len(opt_route)} '
+        f'({" and ".join(f"{d:.2f} km" for d in opt_route["distance_km"])}). The model does not '
+        f'balance workloads — it maximises joint profit, so unequal routes are a result, not an '
+        f'oversight. If an even workload across drivers is a real operational requirement, it has '
+        f'to be added to the model; it is not there today.'))
 
-    sh = cfg.shift
     limits = ' / '.join(f'{h:g} h' for h in sh.report_h)
-    items.append((
-        'Working day',
-        f'At {sh.speed_kmh:g} km/h with {sh.service_time_min:g} min per bin, the optimal routes '
-        f'take {" and ".join(f"{h:.2f} h" for h in metrics_opt.per_route["shift_total_h"])} '
-        f'against {" and ".join(f"{h:.2f} h" for h in fix_route["shift_total_h"])} for the '
-        f'external ones, measured against limits of {limits}. This reverses the reading of every '
-        f'row above: the optimal solution wins on distance, weight and profit because visiting a '
-        f'bin costs it nothing in the objective, which prices distance and never time. The '
-        f'{int(metrics_opt.per_route["n_bins"].sum() - fix_route["n_bins"].sum())} extra stops add '
-        f'{float(metrics_opt.per_route["shift_service_min"].sum() - fix_route["shift_service_min"].sum()):.0f} '
-        f'min of service time that the model does not see. Set shift.enforce = true to make the '
-        f'limit binding and re-solve; the profit advantage will shrink to whatever fits in a shift.'))
+    extra_stops = int(opt_route['n_bins'].sum() - fix_route['n_bins'].sum())
+    extra_service = float(opt_route['shift_service_min'].sum() - fix_route['shift_service_min'].sum())
+    if sh.enforce:
+        working_day = (
+            f'At {sh.speed_kmh:g} km/h with {sh.service_time_min:g} min per bin, the optimal '
+            f'routes take {" and ".join(f"{h:.2f} h" for h in opt_route["shift_total_h"])} '
+            f'against {" and ".join(f"{h:.2f} h" for h in fix_route["shift_total_h"])} for the '
+            f'external ones, reported against {limits}. The {sh.max_shift_h:g} h day is a HARD '
+            f'CONSTRAINT of this run, so every figure above is already what fits in a shift: the '
+            f'{extra_stops:+d} stops of difference and the {extra_service:+.0f} min of service '
+            f'time they carry are paid for inside the day, not on top of it. Nothing here has to '
+            f'be discounted afterwards.')
+    else:
+        working_day = (
+            f'At {sh.speed_kmh:g} km/h with {sh.service_time_min:g} min per bin, the optimal '
+            f'routes take {" and ".join(f"{h:.2f} h" for h in opt_route["shift_total_h"])} '
+            f'against {" and ".join(f"{h:.2f} h" for h in fix_route["shift_total_h"])} for the '
+            f'external ones, measured against limits of {limits}. This reverses the reading of '
+            f'every row above: the optimal solution wins on distance, weight and profit because '
+            f'visiting a bin costs it nothing in the objective, which prices distance and never '
+            f'time. The {extra_stops:+d} stops of difference add {extra_service:+.0f} min of '
+            f'service time that the model does not see. Set shift.enforce = true to make the '
+            f'limit binding and re-solve; the profit advantage will shrink to whatever fits in '
+            f'a shift.')
+    items.append(('Working day', working_day))
 
     items.append((
         'Caveat',
